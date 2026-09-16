@@ -16,11 +16,21 @@ public struct CommandResult: Equatable {
 /// Security: argv arrays only — the tool never uses `shell = true`.
 public protocol CommandRunner {
     func run(command: String, arguments: [String], timeout: TimeInterval) -> CommandResult
+    /// Runs a command with INHERITED stdin/stdout/stderr (exit code only).
+    /// Required for `sudo`: the password prompt goes to the tty, and a piped
+    /// stderr swallows it — the prompt would hang or fail invisibly. Everything
+    /// whose output must be parsed stays on `run`.
+    func runInteractive(command: String, arguments: [String], timeout: TimeInterval) -> Int32
 }
 
 extension CommandRunner {
     public func run(command: String, arguments: [String]) -> CommandResult {
         run(command: command, arguments: arguments, timeout: 20)
+    }
+    /// Default: delegates to `run` so scripted test doubles key interactive
+    /// calls by the same "command arg1 arg2 ..." scheme.
+    public func runInteractive(command: String, arguments: [String], timeout: TimeInterval) -> Int32 {
+        run(command: command, arguments: arguments, timeout: timeout).exitCode
     }
 }
 
@@ -74,6 +84,35 @@ public final class SystemCommandRunner: CommandRunner {
             stdout: String(decoding: outData, as: UTF8.self),
             stderr: String(decoding: errData, as: UTF8.self)
         )
+    }
+
+    /// INHERITED stdio: the child talks to the user's terminal directly, so
+    /// `sudo` can show its password prompt. No pipes, nothing to parse.
+    public func runInteractive(command: String, arguments: [String], timeout: TimeInterval) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command)
+        process.arguments = arguments
+        process.standardInput = FileHandle.standardInput
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+
+        do {
+            try process.run()
+        } catch {
+            FileHandle.standardError.write(Data("spawn failed: \(error.localizedDescription)\n".utf8))
+            return -1
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            usleep(20_000)
+        }
+        if process.isRunning {
+            process.terminate()
+            return -2
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 }
 
