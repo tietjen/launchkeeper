@@ -5,7 +5,7 @@ import Foundation
 /// Rule from the spec: inventory and destructive operations never share a path.
 
 public enum RemediationOperation: String, Codable {
-    case disable, enable, backup, restore
+    case disable, enable, backup, restore, remove
 }
 
 public enum GateDecision: Equatable {
@@ -17,10 +17,12 @@ public enum GateDecision: Equatable {
 /// exception, never the default: anything not explicitly allowed is refused.
 public enum RemediationGate {
 
-    /// Only `disable`/`enable` consult this gate; `backup`/`restore` guard
+    /// `disable`/`enable`/`remove` consult this gate; `backup`/`restore` guard
     /// themselves inside BackupService (allowlist dirs + /System blocklist).
+    /// For `remove` this is only the FIRST half — the file rules continue in
+    /// `evaluateRemove`, which runs right after, on the same item.
     public static func evaluate(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
-        guard operation == .disable || operation == .enable else { return .allowed }
+        guard operation == .disable || operation == .enable || operation == .remove else { return .allowed }
 
         guard let label = item.label, !label.isEmpty else {
             return .denied(reason: "no launchd label — nothing reversible to act on")
@@ -34,6 +36,39 @@ public enum RemediationGate {
             if PathUtils.canonicalize(probe).hasPrefix("/System") {
                 return .denied(reason: "backed by /System — refused even with --apply")
             }
+        }
+        return .allowed
+    }
+
+    /// V0.3 file-removal policy — deliberately in the SAME gate, so "one gate,
+    /// no bypass" stays literally true. Runs after `evaluate` (the Apple and
+    /// /System rules above cover `remove` too). Four independent locks, all
+    /// fail-closed. The last one is what keeps btmctl from becoming an
+    /// `rm`-wrapper: a working component gets DISABLED (reversible), never
+    /// deleted — anything that is not provably broken is not touched.
+    public static func evaluateRemove(item: BackgroundItem,
+                                      fileManager: FileManager = .default,
+                                      launchDirs: [String]) -> GateDecision {
+        // Lock 1: only a launch-dir .plist may ever be the target of a delete.
+        guard let path = item.path, path.hasPrefix("/"), path.hasSuffix(".plist") else {
+            return .denied(reason: "no backing launch .plist — remove deletes plists inside launch directories, nothing else")
+        }
+        // Lock 2: allowlisted directory (exact parent — subdirs and `..`
+        // tricks land outside and are refused).
+        let parent = (path as NSString).deletingLastPathComponent
+        guard launchDirs.contains(parent) else {
+            return .denied(reason: "backing file is not inside a launch directory — outside the allowlist nothing may be deleted")
+        }
+        // Lock 3: never follow a symlink out of the allowlist. A link whose
+        // target escapes the launch dirs would delete outside it.
+        let canonical = PathUtils.canonicalize(path, fileManager: fileManager)
+        let canonicalParent = (canonical as NSString).deletingLastPathComponent
+        if canonical != path, !launchDirs.contains(canonicalParent) {
+            return .denied(reason: "backing file is a symlink resolving outside the launch directories")
+        }
+        // Lock 4: orphaned only.
+        guard item.orphaned else {
+            return .denied(reason: "not orphaned — a working component must be disabled (reversible), not deleted")
         }
         return .allowed
     }

@@ -1,11 +1,12 @@
-# btmctl — macOS Background Service Inventory + Gated Remediation (V0.2)
+# btmctl — macOS Background Service Inventory + Gated Remediation (V0.3)
 
 Read-only CLI for taking stock of what macOS starts in the background:
 LaunchAgents, LaunchDaemons, live `launchd` state, Background Task
 Management (BTM) entries, and code-signature status — correlated into one
 inventory, with orphan detection and risk hints. Since V0.2 it also
 carries a deliberately separate, *gated* remediation module
-(disable/enable/backup/restore).
+(disable/enable/backup/restore), and since V0.3 it can delete —
+**one orphaned launch plist at a time, on top of a fresh backup**.
 
 Think "Sysinternals Autoruns for macOS, as a CLI". **It is not** a malware
 scanner, antivirus, uninstaller or system cleaner.
@@ -13,21 +14,33 @@ scanner, antivirus, uninstaller or system cleaner.
 ## Design guarantee: inventory ↔ destructive ops stay separate
 
 The scan pipeline is and stays write-free; remediation only *reads* it
-(target resolution needs live loaded/enabled state). No command deletes
-files as its purpose — V0.2 changes launchd *state* only (plus the
-snapshot-based `restore`, which replaces a file from its own backup).
-File removal as a feature remains a future, separately-designed step.
+(target resolution needs live loaded/enabled state). `disable`/`enable`
+change launchd *state* only; `restore` replaces files from its own
+backup. `remove` (V0.3) is the first file-deleting command and is kept
+deliberately narrow: it deletes **one** backing launch `.plist`, and
+only when four locks pass at once — the file is an allowlisted launch-dir
+plist, not a symlink escape, and the entry is *provably orphaned*.
+Nothing that still works is ever deleted — a working component leaves
+via `disable` (reversible). This is the rule that keeps btmctl out of
+`rm`-wrapper territory.
 
 Remediation rules, enforced in code (not docs):
 
-- **Dry-run is the default.** `disable`/`enable`/`restore` print a plan
-  and execute nothing unless you add `--apply`.
+- **Dry-run is the default.** `disable`/`enable`/`remove`/`restore`
+  print a plan and execute nothing unless you add `--apply`.
 - **A single gate, no bypass flag.** `com.apple.*` labels and anything
   under `/System` are refused by construction — there is no `--force`
-  that reaches them. The gate is an allowlist, not a denylist.
+  that reaches them. The gate is an allowlist, not a denylist, and for
+  `remove` it covers the file rules too (plist shape, allowlisted
+  directory, symlink, orphaned) — one gate, not two.
+- **No backup, no delete.** `remove --apply` writes a full launch-dir
+  snapshot first, and if that snapshot cannot be written, nothing is
+  removed. The undo hint names the exact snapshot.
 - **Verified, not trusted.** After `--apply`, the executor re-reads
-  launchd (`print` / `print-disabled`) and reports failure when the
-  change is *not* visible — a zero exit code alone proves nothing.
+  launchd (`print` / `print-disabled`) — for `remove`, also the file
+  system — and reports failure when the change is *not* visible. A
+  zero exit code alone proves nothing; a `rm` that exits 0 having
+  deleted nothing is caught by the post-run file read.
 - **Audit from the first version of writes.** Every operation —
   including refusals and dry-runs — is appended to
   `~/Library/Logs/btmctl/operations.log`.
@@ -52,14 +65,24 @@ btmctl inspect <id|name>       # one entry in full detail (by id or fragment)
 btmctl doctor                  # health of the scan itself + orphan summary
 btmctl doctor --json           # machine-readable health report
 
-# V0.2 — remediation (all dry-run unless --apply)
+# V0.2+ — remediation (all dry-run unless --apply)
 btmctl disable <id|name>       # show the disable plan (override + unload)
 btmctl disable <id|name> --apply   # execute it, then verify against launchd
 btmctl enable <id|name> [--now] [--apply]  # undo; --now reloads the job
 btmctl backup [--label <tag>]  # snapshot launch plists + disabled-override
                                # state (read-only, always safe)
 btmctl restore <snapshot> [--apply]  # copy files back from a snapshot
+
+# V0.3 — deletion, deliberately narrow
+btmctl remove <id|name>        # plan: backup snapshot, unload, delete ONE
+                               # orphaned launch plist (gated, dry-run)
+btmctl remove <id|name> --apply  # execute — but only after the pre-delete
+                               # snapshot is written; verified afterwards
 ```
+
+Note: `remove` refuses working components — they leave via `disable`
+(reversible), never via deletion. Undo for a deletion is two steps:
+`btmctl restore <snapshot> && btmctl enable <label> --now`.
 
 Every remediation command accepts `--json`. Examples:
 
@@ -78,6 +101,17 @@ execute for real with: --apply
 $ btmctl disable com.apple.Finder
 REFUSED — Apple system component (com.apple.*) — read-only by policy
   this is a hard gate — no flag bypasses it
+
+$ btmctl remove com.leftover.tool
+DRY-RUN — nothing executed (dry-run is the default).
+plan:
+  1. /bin/launchctl bootout gui/501/com.leftover.tool
+      unload the job before its file goes
+  2. /bin/rm -- /Users/joe/Library/LaunchAgents/com.leftover.tool.plist
+      delete the orphaned backing plist (--apply always snapshots the launch dirs first)
+
+undo later with: btmctl restore <pre-remove backup> && btmctl enable com.leftover.tool --now
+execute for real with: --apply
 ```
 
 More examples:
@@ -126,15 +160,21 @@ No private Apple APIs. The tool never reads or edits Apple's internal BTM
 databases (`attributions.plist` etc.) — it consumes the same public
 `sfltool dumpbtm` output you can run yourself.
 
-Remediation (V0.2) is a separate module that only *reads* that pipeline:
+Remediation (V0.2+) is a separate module that only *reads* that pipeline:
 scan → resolve target → gate → plan → (dry-run | execute + verify). The
-planner emits `launchctl` state changes only (`disable`/`enable`,
+planner emits `launchctl` state changes (`disable`/`enable`,
 `bootout`/`bootstrap`); disable order is override-before-unload so a
-keepAlive job cannot reload mid-plan. `backup` snapshots the four launch
+keepAlive job cannot reload mid-plan, and remove order is unload-before-delete
+so no file is pulled from under a loaded job. `backup` snapshots the four launch
 directories plus `print-disabled` state with a SHA256 manifest;
 `restore` will only copy back into those four directories, verifies each
 staged copy against the manifest before and after writing, and can never
-address `/System`.
+address `/System`. `remove` (V0.3) adds one file operation on top —
+`rm -- <path>` through the same single argv-only, no-shell seam (via the
+interactive sudo seam for system-domain plists) — and only after the
+pre-delete snapshot. The BTM database stays untouched: `sfltool resetbtm`
+is deferred to V0.4 because it has no backup story, and nothing here may
+touch the database until one exists.
 
 ## Development
 
@@ -146,14 +186,17 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 73-test suite includes the V0.2 write
-paths, driven by two test doubles: a stateful `FakeLaunchd` (its
-`print`/`print-disabled` output reflects its current state, so
-before/after a mutation can be asserted) and a copy-runner that
-implements the `sudo cp` seam inside a temp directory. End-to-end tests
-run the full engine — scan, resolve, gate, plan, apply, verify — against
-temporary homes only; live mutation against real system state is a
-separate, deliberate step.
+macOS 26.6.2 without sudo). The 95-test suite includes the V0.2 write
+paths and the V0.3 deletion path, driven by three test doubles: a
+stateful `FakeLaunchd` (its `print`/`print-disabled` output reflects its
+current state, so before/after a mutation can be asserted), a copy-runner
+that implements the `sudo cp` seam inside a temp directory, and a
+removal-runner that makes `rm`/`sudo rm` really delete inside the temp
+tree — because file-system verification reads the real world, so a
+silent `rm` (exit 0, nothing deleted) must be catchable in tests.
+End-to-end tests run the full engine — scan, resolve, gate, plan,
+apply, verify — against temporary homes only; live mutation against real
+system state is a separate, deliberate step.
 
 BTM scan timeout: one `sfltool dumpbtm` attempt with a 45 s budget
 (`BTMCTL_BTM_TIMEOUT` to override). A healthy dump completes in seconds;
@@ -165,10 +208,13 @@ report says so honestly instead of retrying into a longer dead wait.
 - **V0.2** ✅ — disable/enable (launchctl-state only) + snapshot backup
   (`~/Library/Application Support/btmctl/backups`) + restore, dry-run by
   default, single gate, audit log
-- **V0.3** — remove + cleanup workflow + `sfltool resetbtm` (guarded)
-- **V0.4** — app correlation via bundle IDs/Team IDs/Spotlight
+- **V0.3** ✅ — `remove`: one orphaned launch plist at a time, four-lock
+  gate (plist shape, allowlisted dir, no symlink escape, orphaned only),
+  mandatory pre-delete snapshot, file-system verification after `rm`
+- **V0.4** — app correlation via bundle IDs/Team IDs/Spotlight +
+  `sfltool resetbtm` (guarded, only once the BTM database gets a backup
+  story — until then it stays untouched by design)
 
 All destructive features keep the rules in the spec: no `/System`
 writes ever, no implicit wildcards, explicit target identity required,
-audit log of every operation. File removal, when it comes, will be
-designed separately — V0.2 deliberately does not delete anything.
+audit log of every operation.

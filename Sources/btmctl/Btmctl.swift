@@ -2,14 +2,19 @@ import ArgumentParser
 import BTMKit
 import Foundation
 
-// btmctl V0.2 — read-only inventory + GATED, reversible remediation.
+// btmctl V0.3 — read-only inventory + GATED remediation, now including the
+// first file-deleting command — kept deliberately narrow.
 //
-// Still true from V0.1: no command deletes or removes files, and the scan
-// pipeline keeps its write-free design — remediation only READS it (target
-// resolution). What V0.2 adds: launchctl-state overrides (disable/enable) and
-// file snapshots (backup/restore). Dry-run is the DEFAULT: mutation requires
+// The scan pipeline keeps its write-free design — remediation only READS it
+// (target resolution). `remove` deletes exactly ONE orphaned launch .plist
+// inside the launch directories, and only after a full launch-dir snapshot
+// was written: no backup, no delete. Non-orphaned entries leave via
+// `disable` (reversible), never via deletion — that rule is what keeps this
+// tool out of rm-wrapper territory. Dry-run is the DEFAULT: mutation requires
 // --apply. com.apple.* labels and anything under /System are refused by the
-// gate — there is no flag that bypasses it.
+// gate — there is no flag that bypasses it. `sfltool resetbtm` stayed
+// unimplemented on purpose (deferred to V0.4): the BTM database has no
+// backup story, so nothing here may touch it.
 
 private func runScan(userOnly: Bool, systemOnly: Bool) -> ScanReport {
     var options = ScanOptions()
@@ -193,7 +198,7 @@ private func performRemediation(operation: RemediationOperation, target: String,
             }
             print("execute for real with: --apply")
         case .appliedOk:
-            print("applied (\(result.executed.count) command(s)), verified against launchd:")
+            print("applied (\(result.executed.count) command(s)), verified after execution:")
             for line in result.executed { print("  ok  \(line)") }
             if let undo = result.undoHint {
                 print("undo with: \(undo)")
@@ -365,22 +370,50 @@ struct RestoreCommand: ParsableCommand {
     }
 }
 
+struct RemoveCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "remove",
+        abstract: """
+        Delete one ORPHANED launch .plist (gated).
+
+        Refused unless all locks pass: orphaned only, a .plist inside the
+        launch directories, no symlink escape, no Apple or /System target.
+        --apply writes a launch-dir backup first — without a restorable
+        snapshot nothing is deleted. A working component must be disabled
+        instead (reversible).
+        """)
+
+    @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
+    var id: String
+    @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
+    var apply = false
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        try performRemediation(operation: .remove, target: id, apply: apply, now: false, json: json)
+    }
+}
+
 @main
 struct Btmctl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "btmctl",
         abstract: """
-        Background-service inventory + gated remediation (V0.2).
+        Background-service inventory + gated remediation (V0.3).
 
-        Dry-run is the default: disable/enable/restore only show a plan unless
-        --apply is given. Mechanics stay on launchctl state and file snapshots —
-        nothing here deletes files. com.apple.* labels and /System are refused
-        by construction, no flag bypasses the gate.
+        Dry-run is the default: disable/enable/remove/restore only show a plan
+        unless --apply is given. `remove` deletes only an orphaned launch
+        .plist inside the launch directories, and only after a pre-delete
+        backup — working components are disabled instead, never deleted.
+        com.apple.* labels and /System are refused by construction, no flag
+        bypasses the gate.
         """,
-        version: "0.2.0",
+        version: "0.3.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
-                      BackupCommand.self, RestoreCommand.self],
+                      BackupCommand.self, RestoreCommand.self,
+                      RemoveCommand.self],
         defaultSubcommand: ListCommand.self
     )
 }

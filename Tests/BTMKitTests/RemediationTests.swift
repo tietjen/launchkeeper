@@ -433,8 +433,10 @@ final class RemediationEngineTests: XCTestCase {
         XCTAssertEqual(result.status, .appliedOk)
         XCTAssertTrue(fake.disabled.contains("com.example.script"))
         XCTAssertFalse(fake.services.keys.contains("com.example.script"))
-        XCTAssertEqual(result.undoHint, "btmctl enable 01",
-                       "reversibility hint must carry the display id")
+        XCTAssertEqual(result.undoHint, "btmctl enable com.example.script",
+                       "reversibility hint must carry the stable label — "
+                       + "display ids are positional per scan run and would resolve "
+                       + "to a different entry when executed later")
         let audit = engine.audit.readAll()
         XCTAssertTrue(audit.hasSuffix("applied-ok\n"), "actual audit: \(audit)")
     }
