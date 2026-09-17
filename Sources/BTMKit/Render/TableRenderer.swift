@@ -138,6 +138,14 @@ public enum InspectRenderer {
         if let path = item.path, path.hasPrefix("/") {
             lines.append("    ls -lO '\(path)'")
         }
+        // Reversible remediation hint (V0.2, gated). Deliberately absent for
+        // Apple-owned and /System-backed entries — the gate refuses those.
+        if let label = item.label, !label.hasPrefix("com.apple."),
+           !(item.path ?? "").hasPrefix("/System"),
+           !(item.executable.map { PathUtils.canonicalize($0).hasPrefix("/System") } ?? false) {
+            let hint = item.enabled ? "btmctl disable \(item.id)" : "btmctl enable \(item.id)"
+            lines.append("    \(hint) — reversible override (dry-run first, --apply executes)")
+        }
         return lines.joined(separator: "\n")
     }
 }
