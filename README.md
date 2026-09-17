@@ -87,11 +87,24 @@ btmctl remove <id|name>        # plan: backup snapshot, unload, delete ONE
                                # orphaned launch plist (gated, dry-run)
 btmctl remove <id|name> --apply  # execute — but only after the pre-delete
                                # snapshot is written; verified afterwards
+
+# V0.4 — the BTM database reset (the one non-restorable command)
+btmctl resetbtm                # dry-run: shows the record count, names the
+                               # audit snapshot that would be written,
+                               # executes NOTHING
+btmctl resetbtm --apply        # audit snapshot (full dumpbtm + sfltool
+                               # archive), then sfltool resetbtm, then a
+                               # post-dump: the reset is only "applied" if
+                               # the database can be read afterwards
+                               # NOT RESTORABLE: sfltool has no import — the
+                               # snapshot is an audit artifact, not a backup
 ```
 
 Note: `remove` refuses working components — they leave via `disable`
 (reversible), never via deletion. Undo for a deletion is two steps:
-`btmctl restore <snapshot> && btmctl enable <label> --now`.
+`btmctl restore <snapshot> && btmctl enable <label> --now`. `resetbtm` has
+no undo at all; its snapshot exists so the destruction is on record, and
+registrations come back only as the owning apps run again.
 
 # V0.4 — app correlation (read-only, always on)
 `list` gains a dynamic `APP` column (parent application, shown only when
@@ -192,9 +205,10 @@ staged copy against the manifest before and after writing, and can never
 address `/System`. `remove` (V0.3) adds one file operation on top —
 `rm -- <path>` through the same single argv-only, no-shell seam (via the
 interactive sudo seam for system-domain plists) — and only after the
-pre-delete snapshot. The BTM database stays untouched: `sfltool resetbtm`
-is deferred to V0.4 because it has no backup story, and nothing here may
-touch the database until one exists.
+pre-delete snapshot. V0.4 adds the guarded `sfltool resetbtm` on top:
+dry-run default, **no snapshot, no reset**, verify-after-mutate — living
+honestly with the fact that `sfltool` has no import, so the pre-reset
+snapshot is an audit artifact, not a backup.
 
 ## Development
 
@@ -206,19 +220,24 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 115-test suite includes the V0.2 write
-paths, the V0.3 deletion path and the V0.4 app context (bundle trees in
+macOS 26.6.2 without sudo). The 122-test suite includes the V0.2 write
+paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
-not manufacture a gone-verdict" property), driven by three test doubles: a
-stateful `FakeLaunchd` (its `print`/`print-disabled` output reflects its
-current state, so before/after a mutation can be asserted), a copy-runner
-that implements the `sudo cp` seam inside a temp directory, and a
-removal-runner that makes `rm`/`sudo rm` really delete inside the temp
-tree — because file-system verification reads the real world, so a
-silent `rm` (exit 0, nothing deleted) must be catchable in tests.
+not manufacture a gone-verdict" property) and the guarded `resetbtm`
+path, driven by four test doubles: a stateful `FakeLaunchd` (its
+`print`/`print-disabled` output reflects its current state, so before/after
+a mutation can be asserted), a copy-runner that implements the `sudo cp`
+seam inside a temp directory, a removal-runner that makes `rm`/`sudo rm`
+really delete inside the temp tree — because file-system verification
+reads the real world, so a silent `rm` (exit 0, nothing deleted) must be
+catchable in tests — and a stateful in-memory BTM store for the reset.
 End-to-end tests run the full engine — scan, resolve, gate, plan,
 apply, verify — against temporary homes only; live mutation against real
-system state is a separate, deliberate step.
+system state is a separate, deliberate step. The guarded `resetbtm` is
+tested against a stateful in-memory BTM store behind the same runner seam
+(`dumpbtm` renders, `resetbtm` empties; snapshots land in a temp root),
+covering dry-run executes nothing, no snapshot → no reset, unreadable
+database → refused, and failed/timed-out post-dump → appliedFailed.
 
 BTM scan timeout: one `sfltool dumpbtm` attempt with a 45 s budget
 (`BTMCTL_BTM_TIMEOUT` to override). A healthy dump completes in seconds;
@@ -233,11 +252,12 @@ report says so honestly instead of retrying into a longer dead wait.
 - **V0.3** ✅ — `remove`: one orphaned launch plist at a time, four-lock
   gate (plist shape, allowlisted dir, no symlink escape, orphaned only),
   mandatory pre-delete snapshot, file-system verification after `rm`
-- **V0.4** — app correlation via bundle IDs/Team IDs/Spotlight
-  (✅, read-only, degrades to `unknown` when the index is unavailable);
-  `sfltool resetbtm` (guarded) still OPEN: `sfltool` has no import/load,
-  so the BTM database is not restorable — the guard design must live with
-  "audit snapshot, not backup", and the command must say so before the go
+- **V0.4** ✅ — app correlation via bundle IDs/Team IDs/Spotlight (read-only,
+  degrades to `unknown` when the index is unavailable) + guarded
+  `sfltool resetbtm`: dry-run default, mandatory pre-reset audit snapshot
+  (no snapshot, no reset), post-dump verification — with the command
+  stating in words that the snapshot is an audit artifact, not a backup
+  (`sfltool` has no import)
 
 All destructive features keep the rules in the spec: no `/System`
 writes ever, no implicit wildcards, explicit target identity required,

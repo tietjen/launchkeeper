@@ -403,6 +403,107 @@ struct RemoveCommand: ParsableCommand {
     }
 }
 
+struct ResetBtmCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "resetbtm",
+        abstract: """
+        Reset the Background Task Management database (sfltool resetbtm, gated).
+
+        NOT RESTORABLE: sfltool has no import — the pre-reset snapshot is an
+        audit artifact (what was destroyed), not a backup. No snapshot, no
+        reset; unreadable database, no reset; the end state is verified by a
+        post-dump. Registrations re-establish as their apps run again.
+        Dry-run by default.
+        """)
+
+    @Flag(name: .customLong("apply"), help: "execute the reset instead of only showing it")
+    var apply = false
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        let env = BTMResetEnvironment()
+        let service = BTMResetService(env: env)
+        let audit = AuditLog(directory: NSHomeDirectory() + "/Library/Logs/btmctl")
+        let outcome = service.run(apply: apply)
+
+        let (status, snapshotPath): (String, String?)
+        switch outcome {
+        case .dryRun: status = "planned"; snapshotPath = nil
+        case .applied: status = "applied-ok"; snapshotPath = nil
+        case .appliedFailed: status = "applied-fail"; snapshotPath = nil
+        case .refused(let r): status = "refused(\(r))"; snapshotPath = nil
+        }
+        switch outcome {
+        case .applied(_, let after, let snap, _):
+            audit.append(operation: "resetbtm", target: "btm-database",
+                         status: "applied-ok (after \(after) records, snapshot \(snap))")
+        case .appliedFailed(let detail, _, _):
+            audit.append(operation: "resetbtm", target: "btm-database",
+                         status: "applied-fail(\(detail.prefix(80)))")
+        case .refused(let reason):
+            audit.append(operation: "resetbtm", target: "btm-database",
+                         status: "refused(\(reason.prefix(80)))")
+        case .dryRun:
+            audit.append(operation: "resetbtm", target: "btm-database", status: "planned")
+        }
+
+        if json {
+            struct ResetJSON: Codable {
+                var operation: String
+                var status: String
+                var beforeRecords: Int?
+                var afterRecords: Int?
+                var snapshot: String?
+                var notes: [String]
+                var auditPath: String
+            }
+            var before: Int?; var after: Int?; var snap: String?; var notes: [String] = []
+            switch outcome {
+            case .dryRun(let b, let s, let n): (before, after, snap, notes) = (b, nil, nil, n)
+            case .applied(let b, let a, let s, let n): (before, after, snap, notes) = (b, a, s, n)
+            case .appliedFailed(_, let b, let s): (before, after, snap, notes) = (b, nil, s, [])
+            case .refused(let r): (before, after, snap, notes) = (nil, nil, nil, [r])
+            }
+            print(try JSONRenderer.encode(ResetJSON(operation: "resetbtm", status: status,
+                beforeRecords: before, afterRecords: after, snapshot: snap,
+                notes: notes, auditPath: audit.url.path)))
+        } else {
+            switch outcome {
+            case .dryRun(let before, let wouldSnapshot, let notes):
+                print("DRY-RUN — nothing executed (dry-run is the default).")
+                print("current BTM database: \(before) record(s)")
+                print("plan:")
+                print("  1. audit snapshot → \(env.snapshotsRoot)/\(wouldSnapshot).btmdump.txt")
+                print("      + sfltool archive (SharedFileList storage copy)")
+                print("  2. /usr/bin/sfltool resetbtm")
+                print("  3. verify: sfltool dumpbtm again (exit codes prove nothing)")
+                for note in notes { print("\n  \(note)") }
+                print("execute for real with: --apply")
+            case .applied(let before, let after, let snapshot, let notes):
+                print("applied, verified after execution:")
+                print("  BTM records: \(before) -> \(after)")
+                print("  audit snapshot: \(snapshot)")
+                for note in notes { print("  \(note)") }
+            case .appliedFailed(let detail, let before, let snapshot):
+                print("FAILED after \(before) record(s) were read: \(detail)")
+                if let snapshot { print("  audit snapshot: \(snapshot)") }
+                print("  \(btmResetIrreversibilityNote)")
+                print("partial state — inspect with: sfltool dumpbtm")
+            case .refused(let reason):
+                print("REFUSED — \(reason)")
+            }
+            print("audit: \(audit.url.path)")
+        }
+
+        switch outcome {
+        case .appliedFailed, .refused: throw ExitCode(1)
+        case .dryRun, .applied: break
+        }
+    }
+
+}
+
 @main
 struct Btmctl: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -421,7 +522,7 @@ struct Btmctl: ParsableCommand {
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,
-                      RemoveCommand.self],
+                      RemoveCommand.self, ResetBtmCommand.self],
         defaultSubcommand: ListCommand.self
     )
 }
