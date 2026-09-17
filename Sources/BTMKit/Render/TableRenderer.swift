@@ -13,11 +13,20 @@ public enum TableRenderer {
 
         switch mode {
         case .table:
-            header = ["ID", "DOMAIN", "TYPE", "STATE", "SIG", "NAME", "FLAGS"]
+            // The APP column appears only when at least one item resolved a
+            // parent application — a column of dashes would be noise
+            // (Rausch-Unterdrückung is policy, not aesthetics).
+            let showApp = items.contains { $0.parentApplication != nil }
+            header = showApp
+                ? ["ID", "DOMAIN", "TYPE", "STATE", "SIG", "NAME", "APP", "FLAGS"]
+                : ["ID", "DOMAIN", "TYPE", "STATE", "SIG", "NAME", "FLAGS"]
             rows = items.map { item in
-                [item.id, item.domain.rawValue, item.type.rawValue,
-                 stateText(item), item.codeSignatureStatus ?? "-",
-                 truncate(item.displayName, 44), flagsText(item)]
+                var cells = [item.id, item.domain.rawValue, item.type.rawValue,
+                             stateText(item), item.codeSignatureStatus ?? "-",
+                             truncate(item.displayName, 44)]
+                if showApp { cells.append(truncate(item.parentApplication ?? "-", 20)) }
+                cells.append(flagsText(item))
+                return cells
             }
         case .orphans:
             header = ["ID", "NAME", "STATE", "CONF", "REASON"]

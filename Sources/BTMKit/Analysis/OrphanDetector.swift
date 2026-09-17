@@ -46,7 +46,21 @@ public struct OrphanDetector {
                 raise(item.running ? .high : .medium)
             }
 
-            // 4. BTM entry pointing at a .plist that is no longer on disk.
+            // 4. (V0.4) Spotlight is the INDEPENDENT second source: the bundle
+            // path probe says "gone" and a fresh index lookup confirms that
+            // nothing is registered under the bundle id, anywhere. That
+            // upgrades the single path probe to a hard orphan signal.
+            // "unknown"/"relocated" deliberately add nothing — unknown stays
+            // unknown, and relocated means the app exists elsewhere.
+            if item.parentApplication != nil, item.appPresent == false,
+               item.metadata["app-gone-confirmed"] == "missing",
+               let bundleID = item.bundleIdentifier {
+                reasons.append("parent application \(item.parentApplication!) is gone — "
+                    + "bundle ID \(bundleID) not found via Spotlight")
+                raise(.high)
+            }
+
+            // 5. BTM entry pointing at a .plist that is no longer on disk.
             if item.btmPresent, !item.plistPresent, !item.launchdPresent,
                let path = item.path, path.hasSuffix(".plist"), path.hasPrefix("/") {
                 if !PathUtils.exists(path, fileManager: fileManager) {

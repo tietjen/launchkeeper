@@ -2,8 +2,16 @@ import ArgumentParser
 import BTMKit
 import Foundation
 
-// btmctl V0.3 — read-only inventory + GATED remediation, now including the
-// first file-deleting command — kept deliberately narrow.
+// btmctl V0.4 — read-only inventory (now with app correlation) + GATED
+// remediation, including the one file-deleting command — kept deliberately
+// narrow.
+//
+// V0.4 adds app context to the READ-ONLY half only: each item learns its
+// parent application (deepest .app bundle around its executable/path,
+// bundle Info.plist for id/team/name) and, only when that bundle is provably
+// gone, a Spotlight lookup answers "is the app installed anywhere else?".
+// Spotlight is read-only; the scan pipeline stays write-free, and a wedged
+// index degrades to "unknown", never to a guess.
 //
 // The scan pipeline keeps its write-free design — remediation only READS it
 // (target resolution). `remove` deletes exactly ONE orphaned launch .plist
@@ -400,7 +408,7 @@ struct Btmctl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "btmctl",
         abstract: """
-        Background-service inventory + gated remediation (V0.3).
+        Background-service inventory + app correlation + gated remediation (V0.4).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -409,7 +417,7 @@ struct Btmctl: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.3.0",
+        version: "0.4.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

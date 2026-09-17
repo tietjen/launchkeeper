@@ -152,6 +152,23 @@ public struct ScanCoordinator {
 
         // ---- Stage 6: analysis.
         var analyzed = enriched
+        // App context BEFORE orphan detection: the resolver's
+        // app-gone-confirmed flag is what OrphanDetector rule 4 consumes.
+        // Read-only (file probes + mdfind), degrades to "unknown" when the
+        // Spotlight index is unavailable.
+        var appResolver = AppContextResolver(fileManager: env.fileManager, runner: env.runner)
+        appResolver.apply(to: &analyzed)
+        let withParentApp = analyzed.filter { $0.parentApplication != nil }.count
+        if withParentApp > 0 || !appResolver.spotlightQueries.isEmpty {
+            let spotlightState: String
+            switch appResolver.spotlightAvailable {
+            case .some(true): spotlightState = "ok"
+            case .some(false): spotlightState = "UNAVAILABLE (queries degraded to unknown)"
+            case nil: spotlightState = "not needed"
+            }
+            checks.append("app context: \(withParentApp) items with parent app, "
+                + "\(appResolver.spotlightQueries.count) Spotlight lookups (\(spotlightState))")
+        }
         OrphanDetector(fileManager: env.fileManager).apply(to: &analyzed)
         RiskAnalyzer(fileManager: env.fileManager).apply(to: &analyzed)
 

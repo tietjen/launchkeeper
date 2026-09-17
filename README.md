@@ -1,4 +1,4 @@
-# btmctl — macOS Background Service Inventory + Gated Remediation (V0.3)
+# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4)
 
 Read-only CLI for taking stock of what macOS starts in the background:
 LaunchAgents, LaunchDaemons, live `launchd` state, Background Task
@@ -7,6 +7,9 @@ inventory, with orphan detection and risk hints. Since V0.2 it also
 carries a deliberately separate, *gated* remediation module
 (disable/enable/backup/restore), and since V0.3 it can delete —
 **one orphaned launch plist at a time, on top of a fresh backup**.
+V0.4 adds **app correlation** to the read-only half: every item learns
+its parent application, and orphan detection gains an independent
+Spotlight second source.
 
 Think "Sysinternals Autoruns for macOS, as a CLI". **It is not** a malware
 scanner, antivirus, uninstaller or system cleaner.
@@ -50,6 +53,12 @@ Remediation rules, enforced in code (not docs):
 - **Injection-safe by structure.** Targets resolve from the scan (ids or
   unique name fragments); user input never becomes a shell command, and
   backup names cannot traverse paths.
+- **App correlation is read-only and degrades honestly** (V0.4). Parent
+  app = deepest `.app` bundle around the item's executable/path, bundle
+  `Info.plist` for id/team/name. Spotlight (`mdfind`, read-only) is
+  consulted ONLY when the bundle path is provably gone and a bundle id is
+  known — a wedged or erroring index degrades to `unknown`, never to a
+  "gone" verdict, and a missing id means no query at all.
 
 ## Usage
 
@@ -83,6 +92,15 @@ btmctl remove <id|name> --apply  # execute — but only after the pre-delete
 Note: `remove` refuses working components — they leave via `disable`
 (reversible), never via deletion. Undo for a deletion is two steps:
 `btmctl restore <snapshot> && btmctl enable <label> --now`.
+
+# V0.4 — app correlation (read-only, always on)
+`list` gains a dynamic `APP` column (parent application, shown only when
+at least one item resolved one — a column of dashes would be noise).
+`inspect` shows parent, bundle path, team and the confirmation state
+(`present` / `missing` / `relocated` / `unknown`). Orphan detection uses
+the Spotlight result as an independent second source: "executable missing"
+is a file fact, "bundle ID not found via Spotlight" is the app-level
+confirmation.
 
 Every remediation command accepts `--json`. Examples:
 
@@ -142,6 +160,8 @@ failed, it says so instead of pretending the inventory is complete.
     launchctl print (live)   ──┤→ Correlation ──→ Orphan + Risk analysis
     sfltool dumpbtm (BTM)    ──┤     ↓                    ↓
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
+    .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
+                                     Spotlight confirmation)
 
 Key model rule: **a BTM entry is not one plist.** macOS aggregates
 launchd jobs, SMAppService/login-item helpers and legacy services into
@@ -186,8 +206,10 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 95-test suite includes the V0.2 write
-paths and the V0.3 deletion path, driven by three test doubles: a
+macOS 26.6.2 without sudo). The 115-test suite includes the V0.2 write
+paths, the V0.3 deletion path and the V0.4 app context (bundle trees in
+temp directories, `mdfind` scripted — including the "wedged index must
+not manufacture a gone-verdict" property), driven by three test doubles: a
 stateful `FakeLaunchd` (its `print`/`print-disabled` output reflects its
 current state, so before/after a mutation can be asserted), a copy-runner
 that implements the `sudo cp` seam inside a temp directory, and a
@@ -211,9 +233,11 @@ report says so honestly instead of retrying into a longer dead wait.
 - **V0.3** ✅ — `remove`: one orphaned launch plist at a time, four-lock
   gate (plist shape, allowlisted dir, no symlink escape, orphaned only),
   mandatory pre-delete snapshot, file-system verification after `rm`
-- **V0.4** — app correlation via bundle IDs/Team IDs/Spotlight +
-  `sfltool resetbtm` (guarded, only once the BTM database gets a backup
-  story — until then it stays untouched by design)
+- **V0.4** — app correlation via bundle IDs/Team IDs/Spotlight
+  (✅, read-only, degrades to `unknown` when the index is unavailable);
+  `sfltool resetbtm` (guarded) still OPEN: `sfltool` has no import/load,
+  so the BTM database is not restorable — the guard design must live with
+  "audit snapshot, not backup", and the command must say so before the go
 
 All destructive features keep the rules in the spec: no `/System`
 writes ever, no implicit wildcards, explicit target identity required,
