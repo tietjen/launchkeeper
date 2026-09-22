@@ -6,12 +6,14 @@
 #   scripts/release.sh <version> [--notarize] [--upload] [--notes <file>]
 #
 #   <version>     e.g. 0.4.1 — must match `launchkeeper --version` (LaunchKeeper.swift)
-#   --notarize    zip + `xcrun notarytool submit --wait` (keychain profile
-#                 $NOTARY_PROFILE, default "SparkMenu"); a bare Mach-O cannot
-#                 be stapled, Gatekeeper checks the ticket online
-#   --upload      create tag v<version> (if missing), push it, create the
-#                 Gitea release and attach the tarball + SHA256SUMS. Token:
-#                 `rbw get PKGTOKEN` (unlock rbw first) or $GITEA_TOKEN
+#   --notarize    zip + `xcrun notarytool submit --wait`. Credentials: APPLE_ID +
+#                 APPLE_APP_PASSWORD + APPLE_TEAM_ID from the environment (CI), else
+#                 the keychain profile $NOTARY_PROFILE (default "SparkMenu"). A bare
+#                 Mach-O cannot be stapled; Gatekeeper checks the ticket online
+#   --upload      maintainer-local path: create tag v<version> (if missing),
+#                 push it, create a Gitea release with the assets. Public releases
+#                 are built by .github/workflows/release.yml on the tag instead.
+#                 Token: `rbw get PKGTOKEN` (unlock rbw first) or $GITEA_TOKEN
 #   --notes FILE  release body (Markdown); default: a short generated note
 #
 # Rules: refuses a dirty working tree, refuses a version mismatch, and never
@@ -78,9 +80,16 @@ codesign --force --sign "$IDENTITY" --options runtime --timestamp "$DIST/$PKG/la
 codesign --verify --strict --verbose=2 "$DIST/$PKG/launchkeeper"
 
 if [[ $NOTARIZE -eq 1 ]]; then
-    echo "==> Notarize (profile $NOTARY_PROFILE)"
     ditto -c -k --keepParent "$DIST/$PKG/launchkeeper" "$DIST/launchkeeper-notarize.zip"
-    xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+    if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+        # CI: credentials from the environment (GitHub secrets), no keychain profile.
+        echo "==> Notarize (Apple ID from environment)"
+        xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --wait \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+    else
+        echo "==> Notarize (keychain profile $NOTARY_PROFILE)"
+        xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+    fi
     rm -f "$DIST/launchkeeper-notarize.zip"
     NOTARIZED="notarized"
 else

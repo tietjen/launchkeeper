@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Build and test (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Build
+        run: swift build
+      - name: Test (hermetic — no launchctl, no sfltool, no sudo)
+        run: swift test
+      - name: Universal release build
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/launchkeeper"
+          lipo -archs "$BIN"
+          "$BIN" --version
+          mkdir -p artifact && cp "$BIN" artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launchkeeper-universal-unsigned
+          path: artifact/launchkeeper
+          retention-days: 14

@@ -1,0 +1,78 @@
+name: Release
+
+# Tag v<version> -> universal binary, Developer ID signature, Apple
+# notarization, GitHub release with tarball + SHA256SUMS. The version must
+# match the tag (scripts/release.sh checks it against the sources).
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   MACOS_CERTIFICATE_P12        Developer ID Application certificate, .p12, base64-encoded
+#   MACOS_CERTIFICATE_PASSWORD   password of that .p12
+#   APPLE_ID                     Apple ID used for notarization
+#   APPLE_APP_PASSWORD           app-specific password for that Apple ID
+#   APPLE_TEAM_ID                10-character Team ID
+#   CODESIGN_IDENTITY            optional: full identity string if it differs from the script default
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize, publish
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificate into a temporary keychain
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep -c "Developer ID Application"
+
+      - name: Build, sign, notarize, package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          scripts/release.sh "$VERSION" --notarize
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > dist/RELEASE_NOTES.md
+          [ -s dist/RELEASE_NOTES.md ] || echo "See CHANGELOG.md." > dist/RELEASE_NOTES.md
+          printf '\nUniversal binary (arm64 + x86_64), Developer ID signed and notarized. Verify: `shasum -a 256 -c SHA256SUMS`.\n' >> dist/RELEASE_NOTES.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/launchkeeper-v$VERSION-macos-universal.tar.gz" dist/SHA256SUMS \
+            --title "launchkeeper v$VERSION" --notes-file dist/RELEASE_NOTES.md --prerelease
