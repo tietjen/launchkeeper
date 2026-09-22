@@ -120,8 +120,8 @@ final class ItemCorrelatorTests: XCTestCase {
     }
 }
 
-/// V0.4.1 regression: on a real macOS 26 machine, "Vendor QL Extension.appex"
-/// (installed, under an installed VendorApp.app) was reported as "parent
+/// V0.4.1 regression: on a real macOS 26 machine, a QuickLook plug-in with spaces
+/// in its name (installed, under an installed app) was reported as "parent
 /// application bundle missing" — the child's relative BTM URL carried `%20`
 /// into the existence probe. The parent-bundle probe must run on DECODED
 /// paths, for the parent and for the child, and a genuinely missing plug-in

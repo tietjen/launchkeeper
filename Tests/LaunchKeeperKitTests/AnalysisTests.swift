@@ -107,7 +107,7 @@ final class OrphanDetectorTests: XCTestCase {
     }
 
     func testLaunchdBackedBtmEntryIsNotALeftover() {
-        // launchd still holds the job → the zombie shape: not a leftover,
+        // launchd still holds the job → the uninstalled-app shape: not a leftover,
         // the executable-missing reason stays (and `remove` points at disable).
         var item = BackgroundItem(key: "de.x.zombie", displayName: "zombie", type: .unknown)
         item.btmPresent = true

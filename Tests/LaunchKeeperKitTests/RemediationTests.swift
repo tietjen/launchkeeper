@@ -703,10 +703,10 @@ final class LaunchdDomainKindTests: XCTestCase {
 }
 
 final class LibraryLaunchAgentPlannerTests: XCTestCase {
-    /// The live shape from 2026-09-22: Vendor leftovers in /Library/LaunchAgents,
+    /// The live shape from 2026-09-22: vendor leftovers in /Library/LaunchAgents,
     /// loaded in gui/501. V0.4.1 planned `sudo launchctl disable system/<label>`
     /// — a target that did not exist AND a password prompt nobody needed.
-    private func citrix(loaded: Bool = true, enabled: Bool = true) -> BackgroundItem {
+    private func libraryAgent(loaded: Bool = true, enabled: Bool = true) -> BackgroundItem {
         var item = BackgroundItem(key: "com.example.vendoragent", displayName: "com.example.vendoragent",
                                   type: .launchAgentSystem,
                                   path: "/Library/LaunchAgents/com.example.vendoragent.plist",
@@ -718,7 +718,7 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
     }
 
     func testDisableTargetsGuiDomainWithoutSudo() {
-        let plan = RemediationPlanner.plan(operation: .disable, item: citrix(), uid: 501)
+        let plan = RemediationPlanner.plan(operation: .disable, item: libraryAgent(), uid: 501)
         XCTAssertEqual(plan.map(\.display), [
             "/bin/launchctl disable gui/501/com.example.vendoragent",
             "/bin/launchctl bootout gui/501/com.example.vendoragent",
@@ -726,7 +726,7 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
     }
 
     func testEnableNowBootstrapsIntoGuiDomain() {
-        let plan = RemediationPlanner.plan(operation: .enable, item: citrix(loaded: false, enabled: false),
+        let plan = RemediationPlanner.plan(operation: .enable, item: libraryAgent(loaded: false, enabled: false),
                                            uid: 501, now: true)
         XCTAssertEqual(plan.map(\.display), [
             "/bin/launchctl enable gui/501/com.example.vendoragent",
@@ -737,7 +737,7 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
     func testRemoveUnloadsAsUserButDeletesViaSudo() {
         // Two sudo decisions: launchctl by domain (gui → no sudo), the file
         // by directory (/Library → root-owned → sudo rm).
-        let plan = RemediationPlanner.plan(operation: .remove, item: citrix(), uid: 501)
+        let plan = RemediationPlanner.plan(operation: .remove, item: libraryAgent(), uid: 501)
         XCTAssertEqual(plan.map(\.display), [
             "/bin/launchctl bootout gui/501/com.example.vendoragent",
             "/usr/bin/sudo rm -- /Library/LaunchAgents/com.example.vendoragent.plist",
@@ -745,7 +745,7 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
     }
 
     func testDisplayTargetFollowsTheJobDomain() {
-        XCTAssertEqual(RemediationPlanner.displayTarget(for: citrix(), uid: 501),
+        XCTAssertEqual(RemediationPlanner.displayTarget(for: libraryAgent(), uid: 501),
                        "gui/501/com.example.vendoragent")
     }
 
@@ -753,7 +753,7 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
         let fake = FakeLaunchd()
         fake.services["com.example.vendoragent"] = 0
         let executor = RemediationExecutor(runner: fake, uid: 501)
-        let item = citrix()
+        let item = libraryAgent()
         let outcome = executor.execute(RemediationPlanner.plan(operation: .disable, item: item, uid: 501),
                                        operation: .disable, item: item)
         XCTAssertEqual(outcome.status, .appliedOk)

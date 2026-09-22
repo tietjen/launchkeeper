@@ -23,20 +23,17 @@ identifies the machine:
 The mapping is a pure function of the input (seeded PRNG), so regenerating
 from the same captures yields byte-identical fixtures.
 """
-import pathlib, re, random, sys
+import json, pathlib, re, random, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Tests" / "Fixtures"
 REAL = ROOT / "real"
 FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt"]
 
-# Anchors the tests reference by name (readable on purpose).
-FIXED = {
-    "example-domain": "example",
-    "alice": "alice",
-    "vendorkit": "vendorkit", "241012ess7yxs0e": "a1b2c3d4e5f6g7h", "ShipIt": "Updater",
-    "vendor-a": "searchco", "vendor-b": "updater",
-    "vendor-c": "whale",
-}
+# Anchors the tests reference by name get fixed, readable pseudonyms. The
+# mapping itself names real identifiers, so it lives next to the real
+# captures (git-ignored): Tests/Fixtures/real/anchors.json, {"real": "pseudonym"}.
+ANCHORS = REAL / "anchors.json"
+FIXED = json.loads(ANCHORS.read_text()) if ANCHORS.exists() else {}
 
 # Structural vocabulary: format keys, dispositions, types, OS path words,
 # file extensions, launchctl words, company suffixes. Never pseudonymized.
@@ -122,7 +119,7 @@ def main(report=False):
             return c.group(1) + region(c.group(2))
         return UUID.sub(map_uuid, TEAM.sub(map_team, line) if "Team Identifier" in line else line)
 
-    # launchctl output mixes labels without dots ("tool"), labels with
+    # launchctl output mixes labels without dots ("mytool"), labels with
     # spaces ("Some Vendor Agent"), endpoint names glued to paths and app
     # names behind com.apple.xpc.launchd.unmanaged.<App>.<pid>. Region
     # matching misses those, so launchctl files get GLOBAL token mapping with

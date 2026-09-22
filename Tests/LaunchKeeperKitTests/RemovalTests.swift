@@ -566,7 +566,7 @@ final class FilelessRemoveRefusalTests: XCTestCase {
     private let userOnly = ScanOptions(includeUser: true, includeSystem: false,
                                        scanBTM: false, scanSignatures: false)
 
-    /// The live case (com.example.zombie, 2026-09-22): the app
+    /// The live case (2026-09-22): an app had been
     /// uninstalled, plist gone, launchd still holds the job for this login
     /// session. `remove` has nothing to delete — and must say what helps.
     func testLoadedJobWithoutFilePointsAtDisable() throws {
