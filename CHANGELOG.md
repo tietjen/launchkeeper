@@ -5,7 +5,28 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.6
+## [Unreleased] — 0.5.7
+
+### Added
+- Shell startup: the user's and the system's shell startup files, the
+  files they source (depth 1, `~`/`$HOME` resolved, other variables listed
+  as unresolved) and `/etc/paths.d` / `/etc/manpaths.d` entries become
+  items of category `shell-startup` with size, modification time and
+  launch hints (line number + keyword: `launchctl`, `nohup`, background
+  job, `osascript`, `open -a`, `curl | sh`, `eval "$(…)"`, `crontab`,
+  `defaults write`). No line of a shell file is ever printed. A missing
+  `source` target or PATH directory is a low-confidence orphan. `--user-only`
+  scans keep to `$HOME`.
+- Network: `lsof` listeners (TCP LISTEN, bound UDP) grouped per process
+  with the executable from `ps`, as items of category `network` linked to
+  the inventory entry that starts them (by executable or app bundle); the
+  entry gets `listening` metadata and a `LISTEN` flag. Application
+  Firewall rules (`socketfilterfw --listapps`) merge into their process or
+  stand alone; the global state is a `doctor` line. Apple's daemons hide
+  by default. A failed `lsof` or `socketfilterfw` marks the inventory
+  incomplete. 9 tests.
+
+## [0.5.6] — 2026-09-22
 
 ### Added
 - Scheduled: launchd `StartInterval` / `StartCalendarInterval` are rendered

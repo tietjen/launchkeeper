@@ -140,6 +140,11 @@ public enum ItemType: String, Codable {
     case rcScript = "rc-script"
     case emondRule = "emond-rule"
     case plugin = "plugin"
+    // V0.5.7 shell startup / network
+    case shellProfile = "shell-profile"
+    case pathEntry = "path-entry"
+    case listener = "listener"
+    case firewallRule = "firewall-rule"
     case helper
     case script
     case unknown
@@ -171,6 +176,9 @@ public enum EvidenceKind: String, Codable {
     case periodic = "periodic"
     case legacy = "legacy"
     case plugin = "plugin"
+    case shell = "shell"
+    case lsof = "lsof"
+    case firewall = "firewall"
 }
 
 public struct SourceEvidence: Codable, Equatable {
@@ -212,7 +220,8 @@ extension BackgroundItem {
         case .launchDaemon, .systemExtension, .kernelExtension, .privilegedHelper:
             return .system
         case .btmEntry, .appExtension, .helper, .script, .unknown,
-             .cronJob, .atJob, .periodicScript, .powerEvent, .loginHook, .startupItem, .rcScript, .emondRule, .plugin:
+             .cronJob, .atJob, .periodicScript, .powerEvent, .loginHook, .startupItem, .rcScript, .emondRule, .plugin,
+             .shellProfile, .pathEntry, .listener, .firewallRule:
             return domain == .system ? .system : .gui
         }
     }

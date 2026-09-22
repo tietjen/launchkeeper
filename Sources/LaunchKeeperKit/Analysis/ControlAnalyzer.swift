@@ -64,6 +64,18 @@ public struct ControlAnalyzer {
             return Controllability(level: .displayOnly, actions: [],
                 reason: "plugin bundle (\(item.metadata["plugin-kind"] ?? "plugin")) — loaded by location; "
                     + "removal over the gate comes with V0.8")
+        case .shellProfile, .pathEntry:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "shell startup file — launchkeeper never edits shell files; review it in your editor")
+        case .listener:
+            let entry = item.metadata["network-entry-label"] ?? item.metadata["network-entry"]
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "listening process — " + (entry.map { "control its entry `\($0)`" } ?? "no inventory entry starts it")
+                    + "; block it: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --blockapp <path>`")
+        case .firewallRule:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "Application Firewall rule — `sudo /usr/libexec/ApplicationFirewall/socketfilterfw "
+                    + "--remove <path>` / System Settings › Network › Firewall")
         default:
             break
         }

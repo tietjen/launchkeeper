@@ -68,6 +68,7 @@ public enum TableRenderer {
         var flags: [String] = []
         if item.orphaned { flags.append(item.metadata["btm-leftover"] == "true" ? "LEFTOVER" : "ORPHAN") }
         if !item.enabled { flags.append("DISABLED") }
+        if item.category != .network, item.metadata["listening"] != nil { flags.append("LISTEN") }
         let short: [String: String] = [
             "temp-or-hidden-path": "TEMP/PATH",
             "shell-interpreter-service": "SHELL",

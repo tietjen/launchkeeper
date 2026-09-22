@@ -45,6 +45,13 @@ public enum PathUtils {
     ]
 
     /// SIP-protected territory. V0.1 only CLASSIFIES this (read-only); V0.3+ will block on it.
+    /// Apple's own platform binaries: /System, /usr (not /usr/local), /bin,
+    /// /sbin. Used to hide Apple's listening daemons from the default view.
+    public static func isApplePlatformPath(_ path: String) -> Bool {
+        if path.hasPrefix("/usr/local/") || path.hasPrefix("/opt/") { return false }
+        return isSystemOwnedPath(path)
+    }
+
     public static func isSystemOwnedPath(_ path: String) -> Bool {
         path.hasPrefix("/System/") || path.hasPrefix("/usr/") || path.hasPrefix("/bin/")
             || path.hasPrefix("/sbin/") || path.hasPrefix("/usr/libexec/")

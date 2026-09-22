@@ -286,7 +286,7 @@ final class ScheduledStageTests: XCTestCase {
         ])
         let options = ScanOptions(includeUser: true, includeSystem: false, scanBTM: false, scanSignatures: false,
                                   scanExtensions: false, scanSystemExtensions: false, scanHelpers: false,
-                                  scanScheduled: true, scanLegacy: false, scanPlugins: false)
+                                  scanScheduled: true, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false)
         let report = ScanCoordinator(environment: ScanEnvironment(runner: runner, home: root, uid: 501)).perform(options: options)
         XCTAssertEqual(report.incompleteLayers, ["pmset"])
         XCTAssertTrue(report.checks.contains { $0.hasPrefix("pmset sched: FAILED") }, "\(report.checks)")

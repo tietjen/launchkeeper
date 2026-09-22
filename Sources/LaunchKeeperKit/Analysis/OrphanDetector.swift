@@ -94,6 +94,14 @@ public struct OrphanDetector {
                 raise(.medium)
             }
 
+            // 10. (V0.5.7) A shell profile that sources a file that is gone
+            // — the leftover of an uninstalled tool's `source` line.
+            if item.type == .shellProfile || item.type == .pathEntry,
+               let missing = item.metadata["shell-sources-missing"] ?? item.metadata["path-entries-missing"] {
+                reasons.append((item.type == .pathEntry ? "PATH entry points at a missing directory: " : "sources a missing file: ") + missing)
+                raise(.low)
+            }
+
             // 6. (V0.4.4) BTM leftover: the record is all that is left — no
             // plist on disk, no launchd job. Not a broken component but the
             // trail of one already removed. `remove` has nothing to delete and

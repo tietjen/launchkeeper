@@ -52,6 +52,8 @@ public struct ListFilter {
     /// of user-installed backing. Shown only with --all; never offered for
     /// management (system components are read-only by design).
     static func isAppleInternal(_ item: BackgroundItem) -> Bool {
+        // Apple's own listening daemons and firewall rules (V0.5.7).
+        if item.category == .network, let exec = item.executable, PathUtils.isApplePlatformPath(exec) { return true }
         let appleLabel = item.label.map {
             $0.hasPrefix("com.apple.") || $0.hasPrefix("application.com.apple.")
         } ?? false

@@ -24,10 +24,17 @@ public struct ScanOptions: Sendable {
     public var scanLegacy: Bool
     /// Plugin directories: authorization, HAL, Spotlight, QuickLook, … (V0.5.6).
     public var scanPlugins: Bool
+    /// Shell startup files and what they source (V0.5.7).
+    public var scanShell: Bool
+    /// Listening sockets (lsof) and Application Firewall rules (V0.5.7).
+    public var scanNetwork: Bool
     public init(includeUser: Bool = true, includeSystem: Bool = true,
                 scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true,
                 scanSystemExtensions: Bool = true, scanHelpers: Bool = true,
-                scanScheduled: Bool = true, scanLegacy: Bool = true, scanPlugins: Bool = true) {
+                scanScheduled: Bool = true, scanLegacy: Bool = true, scanPlugins: Bool = true,
+                scanShell: Bool = true, scanNetwork: Bool = true) {
+        self.scanShell = scanShell
+        self.scanNetwork = scanNetwork
         self.includeUser = includeUser
         self.includeSystem = includeSystem
         self.scanBTM = scanBTM
@@ -268,6 +275,30 @@ public struct ScanCoordinator {
         } else {
             checks.append("plugin directories: skipped")
         }
+
+        // ---- Stage 3h: shell startup files. File reads only.
+        var shell = ShellStartupScanner.Result()
+        if options.scanShell {
+            // --user-only keeps the scan inside $HOME: no /etc files, no paths.d.
+            shell = options.includeSystem
+                ? ShellStartupScanner(fileManager: env.fileManager, home: env.home).scan()
+                : ShellStartupScanner(fileManager: env.fileManager, home: env.home, systemFiles: [], pathsDirectories: []).scan()
+            checks.append(contentsOf: shell.checks)
+            warnings.append(contentsOf: shell.warnings)
+        } else {
+            checks.append("shell startup: skipped")
+        }
+
+        // ---- Stage 3i: network — listening sockets + firewall rules. Contribute items.
+        var network = NetworkScanner.Result()
+        if options.scanNetwork {
+            network = NetworkScanner(runner: env.runner).scan()
+            checks.append(contentsOf: network.checks)
+            warnings.append(contentsOf: network.warnings)
+            incomplete.append(contentsOf: network.failed)
+        } else {
+            checks.append("network: skipped")
+        }
         if !incomplete.isEmpty {
             warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
                 + "ids are positional per scan and will not match a complete run: address "
@@ -275,11 +306,11 @@ public struct ScanCoordinator {
         }
 
         // ---- Stage 4: correlation.
-        let correlator = ItemCorrelator(fileManager: env.fileManager)
+        let correlator = ItemCorrelator(fileManager: env.fileManager, home: env.home)
         let (items, uncorrelated) = correlator.correlate(ItemCorrelator.Input(
             jobs: jobs, launchd: launchd, btm: btm, disabled: disabled, uid: env.uid,
             extensions: extensions, systemExtensions: systemExtensions, kexts: kexts, helpers: helpers,
-            scheduled: scheduled, legacy: legacy, plugins: plugins.plugins))
+            scheduled: scheduled, legacy: legacy, plugins: plugins.plugins, shell: shell.files, network: network))
 
         // ---- Stage 5: signatures (enrichment).
         var enriched = items

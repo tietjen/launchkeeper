@@ -22,22 +22,30 @@ public struct ItemCorrelator {
         public var scheduled: ScheduledScanner.Result
         public var legacy: LegacyScanner.Result
         public var plugins: [PluginBundleRecord]
+        /// V0.5.7: shell startup files, listening sockets + firewall rules.
+        public var shell: [ShellStartupRecord]
+        public var network: NetworkScanner.Result
         public init(jobs: [LaunchJobRecord], launchd: [LaunchdServiceRecord],
                     btm: [BTMRecord], disabled: [String: Bool], uid: Int,
                     extensions: [AppExtensionRecord] = [],
                     systemExtensions: [SystemExtensionRecord] = [], kexts: [KernelExtensionRecord] = [],
                     helpers: [PrivilegedHelperRecord] = [],
                     scheduled: ScheduledScanner.Result = .init(), legacy: LegacyScanner.Result = .init(),
-                    plugins: [PluginBundleRecord] = []) {
+                    plugins: [PluginBundleRecord] = [],
+                    shell: [ShellStartupRecord] = [], network: NetworkScanner.Result = .init()) {
             self.jobs = jobs; self.launchd = launchd; self.btm = btm
             self.disabled = disabled; self.uid = uid; self.extensions = extensions
             self.systemExtensions = systemExtensions; self.kexts = kexts; self.helpers = helpers
             self.scheduled = scheduled; self.legacy = legacy; self.plugins = plugins
+            self.shell = shell; self.network = network
         }
     }
 
     public var fileManager: FileManager
-    public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
+    let home: String
+    public init(fileManager: FileManager = .default, home: String = NSHomeDirectory()) {
+        self.fileManager = fileManager; self.home = home
+    }
 
     public func correlate(_ input: Input) -> (items: [BackgroundItem], uncorrelated: [String]) {
         var accum: [String: BackgroundItem] = [:]
@@ -499,6 +507,99 @@ public struct ItemCorrelator {
             }
             markDomain(&item, isUser)
             item.sources.append(SourceEvidence(kind: .plugin, detail: "\(plugin.kind): \(plugin.path)", confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 10: shell startup files. One item per file; sourced
+        // files (depth 1) and PATH additions are items of their own.
+        func shortHome(_ path: String) -> String {
+            path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+        }
+        for file in input.shell {
+            let key = "shell:" + file.path
+            let isUser = file.domain == .user
+            var item = BackgroundItem(key: key, displayName: shortHome(file.path),
+                                      type: file.kind == "paths" ? .pathEntry : .shellProfile, path: file.path,
+                                      owner: isUser ? "user" : "root", uid: isUser ? input.uid : 0,
+                                      domain: file.domain, enabled: true, category: .shellStartup)
+            item.metadata["shell-kind"] = file.kind
+            item.metadata["shell-size"] = String(file.size)
+            item.metadata["shell-lines"] = String(file.lines)
+            if let modified = file.modified { item.metadata["shell-modified"] = modified }
+            if !file.sourced.isEmpty { item.metadata[file.kind == "paths" ? "path-entries" : "shell-sources"] = file.sourced.joined(separator: ", ") }
+            if !file.unresolved.isEmpty { item.metadata["shell-sources-unresolved"] = file.unresolved.joined(separator: ", ") }
+            if !file.missingSources.isEmpty {
+                item.metadata[file.kind == "paths" ? "path-entries-missing" : "shell-sources-missing"] = file.missingSources.joined(separator: ", ")
+            }
+            if !file.hints.isEmpty { item.metadata["shell-launch-hints"] = file.hints.joined(separator: "; ") }
+            if let by = file.sourcedBy { item.metadata["shell-sourced-by"] = by }
+            markDomain(&item, isUser)
+            item.sources.append(SourceEvidence(kind: .shell, detail: "\(file.kind): \(file.path)", confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 11: network. One item per listening process, linked to
+        // the inventory entry whose executable it is; firewall rules merge
+        // into the process they name or stand alone.
+        func ownerKey(forExecutable exec: String) -> String? {
+            let canonical = PathUtils.canonicalize(exec, fileManager: fileManager)
+            if let hit = accum.first(where: { entry in
+                entry.value.category != .network
+                    && entry.value.executable.map { PathUtils.canonicalize($0, fileManager: fileManager) == canonical } == true
+            }) { return hit.key }
+            // An app bundle's process: the entry that names the bundle —
+            // V0.4 app context, a BTM component's bundle path, or the login
+            // item whose path IS the app.
+            return accum.first(where: { entry in
+                guard entry.value.category != .network else { return false }
+                let candidates = [entry.value.metadata["app-bundle"], entry.value.metadata["btm-bundle-path"],
+                                  entry.value.path.flatMap { $0.hasSuffix(".app") ? $0 : nil }]
+                return candidates.contains { $0.map { exec.hasPrefix($0 + "/") } == true }
+            })?.key
+        }
+        var networkKeyByExecutable: [String: String] = [:]
+        for process in input.network.processes {
+            let key = "net:\(process.executable ?? process.command):\(process.pid)"
+            let isRoot = process.user == "root"
+            let listening = process.sockets.map { socket -> String in
+                var text = "\(socket.proto)/\(socket.port.map(String.init) ?? socket.address)"
+                if socket.loopbackOnly { text += " (loopback)" }
+                return text
+            }.joined(separator: ", ")
+            var item = BackgroundItem(key: key, displayName: "\(process.command) (pid \(process.pid))", type: .listener,
+                                      path: process.executable, executable: process.executable,
+                                      owner: process.user, uid: isRoot ? 0 : input.uid,
+                                      domain: isRoot ? .system : .user, loaded: true, running: true, enabled: true,
+                                      category: .network)
+            item.metadata["listening"] = listening
+            item.metadata["net-pid"] = String(process.pid)
+            if process.executable == nil { item.metadata["net-executable"] = "unresolved" }
+            if let exec = process.executable, let owner = ownerKey(forExecutable: exec) {
+                item.metadata["network-entry"] = owner
+                accum[owner]?.metadata["listening"] = listening
+                if let label = accum[owner]?.label { item.label = nil; item.metadata["network-entry-label"] = label }
+            }
+            markDomain(&item, !isRoot)
+            item.sources.append(SourceEvidence(kind: .lsof, detail: "lsof: pid \(process.pid) \(listening)", confidence: .high))
+            if let exec = process.executable { networkKeyByExecutable[exec] = key }
+            accum[key] = item
+        }
+        for rule in input.network.firewall {
+            if let key = networkKeyByExecutable[rule.path] {
+                accum[key]?.metadata["firewall"] = rule.action + " incoming connections"
+                accum[key]?.sources.append(SourceEvidence(kind: .firewall, detail: "socketfilterfw: \(rule.action) \(rule.path)",
+                                                          confidence: .high))
+                continue
+            }
+            let key = "fw:" + rule.path
+            var item = BackgroundItem(key: key, displayName: (rule.path as NSString).lastPathComponent, type: .firewallRule,
+                                      path: rule.path, executable: rule.path, owner: "root", uid: 0, domain: .system,
+                                      enabled: true, category: .network)
+            item.metadata["firewall"] = rule.action + " incoming connections"
+            if let owner = ownerKey(forExecutable: rule.path) { item.metadata["network-entry"] = owner }
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(kind: .firewall, detail: "socketfilterfw: \(rule.action) \(rule.path)",
+                                               confidence: .high))
             accum[key] = item
         }
 

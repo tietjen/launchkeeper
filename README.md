@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.6)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.7)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -190,6 +190,10 @@ launchkeeper list --category scheduled          # everything on a timer: launchd
 launchkeeper list --category legacy             # loginwindow hooks, /Library/StartupItems, rc.local, emond rules
 launchkeeper list --category plugin-directories # authorization plugins (with their login wiring), HAL audio,
                                      # Spotlight, QuickLook, input methods, screen savers, prefpanes, …
+launchkeeper list --category shell-startup      # ~/.zshrc & co., /etc/zshrc & co., what they source, launch hints
+                                     # (line numbers + keywords, never a line), /etc/paths.d entries
+launchkeeper list --category network            # listening processes (lsof) linked to the entry that starts them,
+                                     # Application Firewall rules; Apple's daemons with --all
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -297,8 +301,8 @@ Every item carries three more dimensions, visible in `inspect` and `--json`:
 
 - **category** — the Autoruns-style tab it belongs to (`launch-items`,
   `login-items`, `app-extensions`, `system-extensions`,
-  `privileged-helpers`, `scheduled`, `legacy`, `plugin-directories`;
-  shell startup and network follow in V0.5.x).
+  `privileged-helpers`, `scheduled`, `legacy`, `plugin-directories`,
+  `shell-startup`, `network`).
   `list --category <name>` filters by it.
 - **control** — what launchkeeper can do with it, computed from the *same*
   gate the mutating commands consult: `reversible` (disable/enable),
@@ -405,6 +409,34 @@ Internet plug-ins, screen savers, preference panes, scripting additions and
 color pickers, system-wide and per user, each with bundle id, version and
 code signature. Display-only until V0.8 cleanup.
 
+## Shell startup and network (V0.5.7)
+
+**Shell startup** lists the files every interactive shell runs — the
+user's `.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`, `.bash_profile`,
+`.bashrc`, `.profile` and friends, the system's `/etc/zshrc`, `/etc/profile`
+and the rest — plus what they `source` (depth 1, resolved through `~` and
+`$HOME`; targets with other variables are listed as unresolved) and the
+`/etc/paths.d` and `/etc/manpaths.d` PATH additions. Each file carries its
+size, modification time and **launch hints**: line numbers with a keyword
+(`launchctl`, `nohup`, a background job, `osascript`, `open -a`, `curl …
+| sh`, `eval "$(…)"`, `crontab`, `defaults write`). launchkeeper never
+prints a line of a shell file — that is where people export tokens — and
+never edits one. A `source` line whose target is gone, or a PATH entry
+pointing at a missing directory, is a low-confidence orphan: the leftover
+of an uninstalled tool.
+
+**Network** ties listening sockets to the inventory. `lsof` lists every
+TCP listener and bound UDP socket, `ps` resolves the process's executable,
+and the process becomes an item of category `network` with its ports
+(loopback-only marked) — linked by executable path or app bundle to the
+entry that starts it, which in turn gets a `listening` metadata and a
+`LISTEN` flag in the table. Application Firewall rules
+(`socketfilterfw --listapps`) merge into the process they name or stand
+alone; the global firewall state is in `doctor`. Apple's own daemons hide
+like other Apple internals (`--all`). Read-only: the control text names the
+entry to act on and the `socketfilterfw --blockapp` route. A failed `lsof`
+or `socketfilterfw` marks the inventory incomplete.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -417,6 +449,8 @@ code signature. Display-only until V0.8 cleanup.
     crontab/atq/pmset/periodic┤
     loginwindow/StartupItems ──┤
     plugin directories       ──┤
+    shell startup files      ──┤
+    lsof + socketfilterfw    ──┤
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
     .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
                                      Spotlight confirmation)
@@ -538,6 +572,11 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.7** ✅ — shell startup files with sourced files, PATH additions
+  and launch hints (never a line's content), and network: listening
+  processes linked to the entry that starts them, Application Firewall
+  rules, `LISTEN` flag — categories `shell-startup` / `network`; the V0.5
+  breadth is complete
 - **V0.5.6** ✅ — scheduled work (launchd timers as metadata, cron, at,
   periodic, pmset), legacy persistence (loginwindow hooks, StartupItems,
   rc.local, emond) and plugin directories (authorization plugins with their
