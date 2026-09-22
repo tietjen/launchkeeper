@@ -136,11 +136,11 @@ public enum RemediationPlanner {
     public static func undoHint(for operation: RemediationOperation, item: BackgroundItem) -> String? {
         let target = hintAddress(item)
         switch operation {
-        case .disable: return "btmctl enable \(target)"
-        case .enable: return "btmctl disable \(target)"
+        case .disable: return "launchkeeper enable \(target)"
+        case .enable: return "launchkeeper disable \(target)"
         // Real undo for a deletion: restore the pre-remove snapshot, then
         // reactivate (only meaningful if there was something to reactivate).
-        case .remove: return "btmctl restore <pre-remove backup> && btmctl enable \(target) --now"
+        case .remove: return "launchkeeper restore <pre-remove backup> && launchkeeper enable \(target) --now"
         case .backup, .restore: return nil
         }
     }

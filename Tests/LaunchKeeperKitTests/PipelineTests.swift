@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 /// The codesign seam: Apple-core paths classify without spawning, /usr/local
 /// and everything else goes through `codesign -dvvv` via the injectable runner.
@@ -57,7 +57,7 @@ final class SignatureScannerTests: XCTestCase {
 final class ScanPipelineTests: XCTestCase {
     private func makeTempHome(withPlists: Bool = true) throws -> String {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("launchkeeper-tests-\(UUID().uuidString)", isDirectory: true)
         let agents = dir.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
         try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
         if withPlists {
@@ -187,7 +187,7 @@ final class ScanPipelineTests: XCTestCase {
     }
 
     func testRealFixturesEndToEnd() throws {
-        // Whole real capture (127 BTM records, 2900+ launchctl lines) through
+        // Whole anonymized capture (127 BTM records, 2900+ launchctl lines) through
         // the full pipeline. Signature stage off: keeps the test shell-out free.
         let home = try makeTempHome(withPlists: false)
         defer { try? FileManager.default.removeItem(atPath: home) }

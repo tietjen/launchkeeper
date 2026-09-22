@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 // V0.4 app-correlation tests. HERMETIC as everything else: bundle trees in a
 // temp directory, mdfind through ScriptedCommandRunner, the file system via
@@ -13,7 +13,7 @@ import XCTest
 
 private func tempRoot(_ tag: String) -> String {
     FileManager.default.temporaryDirectory
-        .appendingPathComponent("btmctl-appcontext-\(tag)-\(UUID().uuidString)", isDirectory: true).path
+        .appendingPathComponent("launchkeeper-appcontext-\(tag)-\(UUID().uuidString)", isDirectory: true).path
 }
 
 /// Creates `<root>/Applications/<name>.app` with an Info.plist

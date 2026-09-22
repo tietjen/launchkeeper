@@ -196,7 +196,7 @@ public struct RemediationEngine {
     public init(environment: RemediationEnvironment = RemediationEnvironment(),
                 audit: AuditLog? = nil) {
         self.environment = environment
-        self.audit = audit ?? AuditLog(directory: environment.home + "/Library/Logs/btmctl")
+        self.audit = audit ?? AuditLog(directory: LaunchKeeperPaths.logs(home: environment.home))
     }
 
     /// The scan every remediation resolves against: the SAME item set `list`
@@ -247,7 +247,7 @@ public struct RemediationEngine {
         switch TargetResolver.resolve(needle, in: report.items) {
         case .none(let needle):
             return finish(.refused("no match: \(needle)"), target: needle,
-                          messages: ["no entry matches '\(needle)' — start with `btmctl list`"])
+                          messages: ["no entry matches '\(needle)' — start with `launchkeeper list`"])
         case .ambiguous(let needle, let candidates):
             return finish(.refused("ambiguous: \(needle)"), target: needle,
                           messages: ["ambiguous '\(needle)' (\(candidates.count) matches):"] + candidates)
@@ -317,7 +317,7 @@ public struct RemediationEngine {
                                  status: "pre-remove")
                     // Label, not display id — the hint must resolve correctly
                     // in a LATER scan, and ids are positional per run.
-                    undoText = "btmctl restore \(snapshot.backupName) && btmctl enable \(item.label ?? item.id) --now"
+                    undoText = "launchkeeper restore \(snapshot.backupName) && launchkeeper enable \(item.label ?? item.id) --now"
                 }
 
                 let executor = RemediationExecutor(runner: environment.runner, uid: environment.uid,
@@ -341,7 +341,7 @@ public struct RemediationEngine {
             let target = RemediationPlanner.displayTarget(for: item, uid: environment.uid)
             hint = " — launchd still holds the job (\(target)) from a file that no longer "
                 + "exists; it vanishes at the next login, or unload it now: "
-                + "btmctl disable \(label) --apply"
+                + "launchkeeper disable \(label) --apply"
         } else if item.btmPresent {
             hint = " — only a Background Task Management record remains; BTM prunes it "
                 + "itself (sfltool has no per-item delete)"

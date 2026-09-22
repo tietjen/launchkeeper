@@ -1,8 +1,8 @@
 import ArgumentParser
-import BTMKit
+import LaunchKeeperKit
 import Foundation
 
-// btmctl V0.4 — read-only inventory (now with app correlation) + GATED
+// launchkeeper V0.4 — read-only inventory (now with app correlation) + GATED
 // remediation, including the one file-deleting command — kept deliberately
 // narrow.
 //
@@ -110,7 +110,7 @@ struct InspectCommand: ParsableCommand {
 
         switch candidates.count {
         case 0:
-            throw ValidationError("no entry matches '\(id)' — start with `btmctl list`")
+            throw ValidationError("no entry matches '\(id)' — start with `launchkeeper list`")
         case 1:
             if json {
                 print(try JSONRenderer.encode(candidates[0]))
@@ -150,7 +150,7 @@ struct DoctorCommand: ParsableCommand {
                 orphanCount: orphans.count, orphans: orphans)))
             return
         }
-        print("btmctl doctor — read-only checks")
+        print("launchkeeper doctor — read-only checks")
         for check in report.checks {
             print("  . \(check)")
         }
@@ -164,7 +164,7 @@ struct DoctorCommand: ParsableCommand {
         }
         let orphans = report.items.filter { $0.orphaned }.count
         if orphans > 0 {
-            print("\n\(orphans) orphaned entries — inspect with: btmctl list --orphans")
+            print("\n\(orphans) orphaned entries — inspect with: launchkeeper list --orphans")
         }
     }
 }
@@ -172,7 +172,7 @@ struct DoctorCommand: ParsableCommand {
 // MARK: - V0.2 remediation commands
 
 /// Engine-backed display + JSON for disable/enable. All decisions already
-/// happened in BTMKit (gate/plan/executor); this only renders and audits.
+/// happened in LaunchKeeperKit (gate/plan/executor); this only renders and audits.
 private func performRemediation(operation: RemediationOperation, target: String,
                                 apply: Bool, now: Bool, json: Bool) throws {
     let engine = RemediationEngine()
@@ -217,7 +217,7 @@ private func performRemediation(operation: RemediationOperation, target: String,
             print("FAILED (\(detail)) after \(result.executed.count) command(s):")
             for line in result.executed { print("  \(line)") }
             for line in result.messages { print("  \(line)") }
-            print("partial state — inspect with: btmctl inspect <id>")
+            print("partial state — inspect with: launchkeeper inspect <id>")
         case .refused(let reason):
             print("REFUSED — \(reason)")
             for line in result.messages where !line.hasPrefix("refused:") {
@@ -281,7 +281,7 @@ struct BackupCommand: ParsableCommand {
 
     mutating func run() throws {
         let service = BackupService()
-        let audit = AuditLog(directory: NSHomeDirectory() + "/Library/Logs/btmctl")
+        let audit = AuditLog(directory: LaunchKeeperPaths.logs(home: NSHomeDirectory()))
         switch service.create(label: label) {
         case .failure(let message):
             print("backup failed: \(message)")
@@ -303,7 +303,7 @@ struct BackupCommand: ParsableCommand {
                 print("snapshot: \(report.backupDir)")
                 print("  \(report.copied) plist(s) + disabled-override dumps")
                 for note in report.notes { print("  ! \(note)") }
-                print("\nrestore with: btmctl restore \(report.backupName)")
+                print("\nrestore with: launchkeeper restore \(report.backupName)")
             }
         }
     }
@@ -314,7 +314,7 @@ struct RestoreCommand: ParsableCommand {
         commandName: "restore",
         abstract: "Copy launch-dir files back from a snapshot (allowlisted dirs; dry-run by default).")
 
-    @Argument(help: "backup name — see ~/Library/Application Support/btmctl/backups")
+    @Argument(help: "backup name — see ~/Library/Application Support/launchkeeper/backups (btmctl-era snapshots are found too)")
     var name: String
     @Flag(name: .customLong("apply"), help: "actually copy files back")
     var apply = false
@@ -328,7 +328,7 @@ struct RestoreCommand: ParsableCommand {
             throw ValidationError("backup name must not contain path separators")
         }
         let service = BackupService()
-        let audit = AuditLog(directory: NSHomeDirectory() + "/Library/Logs/btmctl")
+        let audit = AuditLog(directory: LaunchKeeperPaths.logs(home: NSHomeDirectory()))
 
         switch service.restore(name: name, apply: apply) {
         case .failure(let message):
@@ -370,7 +370,7 @@ struct RestoreCommand: ParsableCommand {
                 for path in report.refused { print("  REFUSED: \(path)") }
                 for path in report.failed { print("  FAILED: \(path)") }
                 if !report.restored.isEmpty {
-                    print("verify: btmctl list   (and re-check state for restarts yourself)")
+                    print("verify: launchkeeper list   (and re-check state for restarts yourself)")
                 }
             }
             if apply, !report.refused.isEmpty || !report.failed.isEmpty {
@@ -426,7 +426,7 @@ struct ResetBtmCommand: ParsableCommand {
     mutating func run() throws {
         let env = BTMResetEnvironment()
         let service = BTMResetService(env: env)
-        let audit = AuditLog(directory: NSHomeDirectory() + "/Library/Logs/btmctl")
+        let audit = AuditLog(directory: LaunchKeeperPaths.logs(home: NSHomeDirectory()))
         let outcome = service.run(apply: apply)
 
         let status: String
@@ -507,11 +507,11 @@ struct ResetBtmCommand: ParsableCommand {
 }
 
 @main
-struct Btmctl: ParsableCommand {
+struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "btmctl",
+        commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.4.5).
+        Background-service inventory + app correlation + gated remediation (V0.5.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -520,7 +520,7 @@ struct Btmctl: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.4.5",
+        version: "0.5.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

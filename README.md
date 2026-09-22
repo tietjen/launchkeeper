@@ -1,4 +1,8 @@
-# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4.5)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.0)
+
+> Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
+> guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
+> to the `launchkeeper` equivalents — the old audit log is carried over once, old backups still restore.
 
 Read-only CLI for taking stock of what macOS starts in the background:
 LaunchAgents, LaunchDaemons, live `launchd` state, Background Task
@@ -24,7 +28,7 @@ deliberately narrow: it deletes **one** backing launch `.plist`, and
 only when four locks pass at once — the file is an allowlisted launch-dir
 plist, not a symlink escape, and the entry is *provably orphaned*.
 Nothing that still works is ever deleted — a working component leaves
-via `disable` (reversible). This is the rule that keeps btmctl out of
+via `disable` (reversible). This is the rule that keeps launchkeeper out of
 `rm`-wrapper territory.
 
 Remediation rules, enforced in code (not docs):
@@ -46,17 +50,17 @@ Remediation rules, enforced in code (not docs):
   deleted nothing is caught by the post-run file read.
 - **Audit from the first version of writes.** Every operation —
   including refusals and dry-runs — is appended to
-  `~/Library/Logs/btmctl/operations.log`.
+  `~/Library/Logs/launchkeeper/operations.log`.
 - **System scope runs interactively.** Commands that need root go through
-  one `sudo` seam with inherited stdio *in btmctl's own process group*, so
+  one `sudo` seam with inherited stdio *in launchkeeper's own process group*, so
   the password prompt is visible, echo is off, and sudo actually receives
   what you type (V0.4.2 — Foundation's `Process` had put the child into a
   background process group, which showed the password in clear text and
   never accepted it). Root is needed only where it is needed: `launchctl`
   for jobs in the `system` domain, `rm`/`cp` for files under `/Library`.
   A `/Library/LaunchAgents` agent is a *user-session* job with a
-  root-owned file — btmctl unloads it as you and deletes it via sudo.
-  btmctl never asks for blanket sudo and never uses a shell.
+  root-owned file — launchkeeper unloads it as you and deletes it via sudo.
+  launchkeeper never asks for blanket sudo and never uses a shell.
 - **Injection-safe by structure.** Targets resolve from the scan (ids or
   unique name fragments); user input never becomes a shell command, and
   backup names cannot traverse paths.
@@ -69,38 +73,38 @@ Remediation rules, enforced in code (not docs):
 
 ## Installation (macOS 14+)
 
-btmctl is one universal CLI binary (Apple silicon + Intel), signed with a
+launchkeeper is one universal CLI binary (Apple silicon + Intel), signed with a
 Developer ID and notarized by Apple. Test releases are published on Gitea:
-<https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases>
+<https://git.dev.paranoidsecurity.de/tj/launchkeeper/releases>
 (the source repository stays private while the tool is in multi-device
 testing; the **Releases** unit is set to anonymous read, so the assets
 download without a login or token).
 
 ### Option A — prebuilt release (no Xcode needed)
 
-1. **Download** `btmctl-vX.Y.Z-macos-universal.tar.gz` and `SHA256SUMS`
+1. **Download** `launchkeeper-vX.Y.Z-macos-universal.tar.gz` and `SHA256SUMS`
    from the release page. Prefer `curl` over the browser: files fetched by
    curl carry no quarantine flag, so Gatekeeper never gets involved.
    ```
-   BASE=https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases/download/v0.4.5
-   curl -fsSLO "$BASE/btmctl-v0.4.5-macos-universal.tar.gz"
+   BASE=https://git.dev.paranoidsecurity.de/tj/launchkeeper/releases/download/v0.5.0
+   curl -fsSLO "$BASE/launchkeeper-v0.5.0-macos-universal.tar.gz"
    curl -fsSLO "$BASE/SHA256SUMS"
    ```
    (Copying the tarball over AirDrop, scp or a NAS share works just as well.)
 2. **Verify** the checksum, then unpack:
    ```
    shasum -a 256 -c SHA256SUMS
-   tar -xzf btmctl-v0.4.5-macos-universal.tar.gz
+   tar -xzf launchkeeper-v0.5.0-macos-universal.tar.gz
    ```
 3. **Install** into your PATH (`/usr/local/bin` needs sudo once):
    ```
-   sudo install -m 755 btmctl-v0.4.5-macos-universal/btmctl /usr/local/bin/btmctl
+   sudo install -m 755 launchkeeper-v0.5.0-macos-universal/launchkeeper /usr/local/bin/launchkeeper
    ```
 4. **Check the signature and run the first scan:**
    ```
-   codesign -dv --verbose=2 /usr/local/bin/btmctl   # Authority=Developer ID Application: Jan Tietjen (Y2LTPLFG6D)
-   btmctl --version                                   # 0.4.5
-   btmctl doctor                                      # read-only health check
+   codesign -dv --verbose=2 /usr/local/bin/launchkeeper   # Authority=Developer ID Application: Jan Tietjen (Y2LTPLFG6D)
+   launchkeeper --version                                   # 0.5.0
+   launchkeeper doctor                                      # read-only health check
    ```
    The first `doctor` after a macOS upgrade may report the BTM layer as
    timed out — the BTM daemon is migrating its store; run it again.
@@ -111,76 +115,76 @@ online — release binaries are notarized (since v0.4.1), so it passes. A bare C
 offline first run, or a copy made before the notarization run, may still
 be refused; clear the flag before installing in that case:
 ```
-xattr -d com.apple.quarantine btmctl-v0.4.5-macos-universal/btmctl
+xattr -d com.apple.quarantine launchkeeper-v0.5.0-macos-universal/launchkeeper
 ```
 
-**Uninstall:** `sudo rm /usr/local/bin/btmctl`. btmctl keeps its data in
-`~/Library/Logs/btmctl/operations.log` (audit log) and
-`~/Library/Application Support/btmctl/` (backups, BTM snapshots) — delete
+**Uninstall:** `sudo rm /usr/local/bin/launchkeeper`. launchkeeper keeps its data in
+`~/Library/Logs/launchkeeper/operations.log` (audit log) and
+`~/Library/Application Support/launchkeeper/` (backups, BTM snapshots) — delete
 those only if you no longer need the undo history.
 
 ### Option B — build from source (Xcode 16+ / Swift 6)
 
 ```
-git clone ssh://git@git.dev.paranoidsecurity.de:2222/tj/macos-housecleaning-tool.git
-cd macos-housecleaning-tool
+git clone ssh://git@git.dev.paranoidsecurity.de:2222/tj/launchkeeper.git
+cd launchkeeper
 swift build -c release
-sudo install -m 755 .build/release/btmctl /usr/local/bin/btmctl
+sudo install -m 755 .build/release/launchkeeper /usr/local/bin/launchkeeper
 ```
 
 ### Cutting a release (maintainer)
 
 ```
-scripts/release.sh 0.4.5                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
-scripts/release.sh 0.4.5 --notarize       # + Apple notarization (keychain profile, see script header)
+scripts/release.sh 0.5.0                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
+scripts/release.sh 0.5.0 --notarize       # + Apple notarization (keychain profile, see script header)
 # Notarize an already-shipped binary later (same bytes → same ticket, no re-release):
-#   tar -xzf dist/btmctl-v0.4.5-macos-universal.tar.gz && ditto -c -k --keepParent btmctl-v0.4.5-macos-universal/btmctl n.zip
+#   tar -xzf dist/launchkeeper-v0.5.0-macos-universal.tar.gz && ditto -c -k --keepParent launchkeeper-v0.5.0-macos-universal/launchkeeper n.zip
 #   xcrun notarytool submit n.zip --keychain-profile SparkMenu --wait
-scripts/release.sh 0.4.5 --upload         # + tag v0.4.5, Gitea release with assets (rbw must be unlocked)
+scripts/release.sh 0.5.0 --upload         # + tag v0.5.0, Gitea release with assets (rbw must be unlocked)
 ```
 
 ## Usage
 
 ```
-btmctl list                    # the inventory table (default command)
-btmctl list --orphans          # only provably broken entries, with reasons
-btmctl list --running          # only entries with a live process
-btmctl list --user / --system  # restrict to one launchd domain
-btmctl list --disabled         # entries flagged disabled (BTM/launchd)
-btmctl list --all              # include Apple-internal bookkeeping entries
-btmctl list --json             # machine-readable (audit/SIEM/Ansible)
-btmctl inspect <id|name>       # one entry in full detail (by id or fragment)
+launchkeeper list                    # the inventory table (default command)
+launchkeeper list --orphans          # only provably broken entries, with reasons
+launchkeeper list --running          # only entries with a live process
+launchkeeper list --user / --system  # restrict to one launchd domain
+launchkeeper list --disabled         # entries flagged disabled (BTM/launchd)
+launchkeeper list --all              # include Apple-internal bookkeeping entries
+launchkeeper list --json             # machine-readable (audit/SIEM/Ansible)
+launchkeeper inspect <id|name>       # one entry in full detail (by id or fragment)
                                # ids are positional per scan but IDENTICAL across
                                # list/inspect/disable/enable/remove: every command
                                # numbers the same full inventory (V0.4.3). If a
                                # layer failed (e.g. BTM timed out), the run is
                                # marked incomplete and numbers are REFUSED for
                                # disable/enable/remove — use the label (V0.4.5)
-btmctl doctor                  # health of the scan itself + orphan summary
-btmctl doctor --json           # machine-readable health report
+launchkeeper doctor                  # health of the scan itself + orphan summary
+launchkeeper doctor --json           # machine-readable health report
 
 # V0.2+ — remediation (all dry-run unless --apply)
-btmctl disable <id|name>       # show the disable plan (override + unload)
-btmctl disable <id|name> --apply   # execute it, then verify against launchd
-btmctl enable <id|name> [--now] [--apply]  # undo; --now reloads the job
-btmctl backup [--label <tag>]  # snapshot launch plists + disabled-override
+launchkeeper disable <id|name>       # show the disable plan (override + unload)
+launchkeeper disable <id|name> --apply   # execute it, then verify against launchd
+launchkeeper enable <id|name> [--now] [--apply]  # undo; --now reloads the job
+launchkeeper backup [--label <tag>]  # snapshot launch plists + disabled-override
                                # state (read-only, always safe)
-btmctl restore <snapshot> [--apply]  # copy files back from a snapshot
+launchkeeper restore <snapshot> [--apply]  # copy files back from a snapshot
 
 # V0.3 — deletion, deliberately narrow
-btmctl remove <id|name>        # plan: backup snapshot, unload, delete ONE
+launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
                                # orphaned launch plist (gated, dry-run)
-btmctl remove <id|name> --apply  # execute — but only after the pre-delete
+launchkeeper remove <id|name> --apply  # execute — but only after the pre-delete
                                # snapshot is written; verified afterwards
                                # a job launchd still holds from a plist that is
                                # already gone is REFUSED here — the refusal names
-                               # the working command (btmctl disable … --apply)
+                               # the working command (launchkeeper disable … --apply)
 
 # V0.4 — the BTM database reset (the one non-restorable command)
-btmctl resetbtm                # dry-run: shows the record count, names the
+launchkeeper resetbtm                # dry-run: shows the record count, names the
                                # audit snapshot that would be written,
                                # executes NOTHING
-btmctl resetbtm --apply        # audit snapshot (full dumpbtm + sfltool
+launchkeeper resetbtm --apply        # audit snapshot (full dumpbtm + sfltool
                                # archive), then sfltool resetbtm, then a
                                # post-dump: the reset is only "applied" if
                                # the database can be read afterwards
@@ -190,7 +194,7 @@ btmctl resetbtm --apply        # audit snapshot (full dumpbtm + sfltool
 
 Note: `remove` refuses working components — they leave via `disable`
 (reversible), never via deletion. Undo for a deletion is two steps:
-`btmctl restore <snapshot> && btmctl enable <label> --now`. `resetbtm` has
+`launchkeeper restore <snapshot> && launchkeeper enable <label> --now`. `resetbtm` has
 no undo at all; its snapshot exists so the destruction is on record, and
 registrations come back only as the owning apps run again.
 
@@ -206,7 +210,7 @@ confirmation.
 Every remediation command accepts `--json`. Examples:
 
 ```
-$ btmctl disable 07
+$ launchkeeper disable 07
 DRY-RUN — nothing executed (dry-run is the default).
 plan:
   1. /bin/launchctl disable gui/501/com.example.script
@@ -214,14 +218,14 @@ plan:
   2. /bin/launchctl bootout gui/501/com.example.script
       unload the running job
 
-undo later with: btmctl enable 07
+undo later with: launchkeeper enable 07
 execute for real with: --apply
 
-$ btmctl disable com.apple.Finder
+$ launchkeeper disable com.apple.Finder
 REFUSED — Apple system component (com.apple.*) — read-only by policy
   this is a hard gate — no flag bypasses it
 
-$ btmctl remove com.leftover.tool
+$ launchkeeper remove com.leftover.tool
 DRY-RUN — nothing executed (dry-run is the default).
 plan:
   1. /bin/launchctl bootout gui/501/com.leftover.tool
@@ -229,14 +233,14 @@ plan:
   2. /bin/rm -- /Users/joe/Library/LaunchAgents/com.leftover.tool.plist
       delete the orphaned backing plist (--apply always snapshots the launch dirs first)
 
-undo later with: btmctl restore <pre-remove backup> && btmctl enable com.leftover.tool --now
+undo later with: launchkeeper restore <pre-remove backup> && launchkeeper enable com.leftover.tool --now
 execute for real with: --apply
 ```
 
 More examples:
 
 ```
-$ btmctl doctor
+$ launchkeeper doctor
 macOS 26.6.2
   . plist sources: 3 dirs, 34 jobs read
   . launchctl print gui/501: ok (463 service lines)
@@ -247,7 +251,7 @@ macOS 26.6.2
   . 69 items, 9 orphaned, 0 BTM entries uncorrelated
   no warnings
 
-$ btmctl list --orphans
+$ launchkeeper list --orphans
 ID  NAME                    STATE    CONF  REASON
 03  old-adobe-helper        -        high  executable missing: …
 ```
@@ -266,7 +270,7 @@ failed, it says so instead of pretending the inventory is complete.
 
 Key model rule: **a BTM entry is not one plist.** macOS aggregates
 launchd jobs, SMAppService/login-item helpers and legacy services into
-BTM records. btmctl therefore correlates sources into normalized
+BTM records. launchkeeper therefore correlates sources into normalized
 `BackgroundItem`s (many evidence sources → one component) and reports a
 correlation confidence instead of pretending precision it does not have.
 
@@ -332,7 +336,7 @@ covering dry-run executes nothing, no snapshot → no reset, unreadable
 database → refused, and failed/timed-out post-dump → appliedFailed.
 
 BTM scan timeout: one `sfltool dumpbtm` attempt with a 45 s budget
-(`BTMCTL_BTM_TIMEOUT` to override). A healthy dump completes in seconds.
+(`LAUNCHKEEPER_BTM_TIMEOUT` to override). A healthy dump completes in seconds.
 A timeout has two typical causes the tool cannot tell apart: the first run
 after a macOS upgrade (the BTM daemon migrates its store — seen live on the
 26 → 27 upgrade: 45 s timeout, 3 s on the next run) or a blocked call
@@ -348,7 +352,7 @@ orphans).
 ## Roadmap
 
 - **V0.2** ✅ — disable/enable (launchctl-state only) + snapshot backup
-  (`~/Library/Application Support/btmctl/backups`) + restore, dry-run by
+  (`~/Library/Application Support/launchkeeper/backups`) + restore, dry-run by
   default, single gate, audit log
 - **V0.3** ✅ — `remove`: one orphaned launch plist at a time, four-lock
   gate (plist shape, allowlisted dir, no symlink escape, orphaned only),
@@ -363,7 +367,7 @@ orphans).
   two false-positive orphans on macOS 26), honest BTM-timeout message (cold
   start after an OS upgrade vs. blocked call), warning-free build, release
   script + installation guide for the multi-device test round
-- **V0.4.2** ✅ — sudo seam via `posix_spawn` in btmctl's own process group
+- **V0.4.2** ✅ — sudo seam via `posix_spawn` in launchkeeper's own process group
   (the Foundation `Process` child was a background job: clear-text echo, no
   input); launchd domain derived from the job, not the plist directory
   (`/Library/LaunchAgents` agents are `gui/<uid>` jobs, no sudo for

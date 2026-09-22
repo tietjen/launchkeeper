@@ -24,7 +24,7 @@ public struct ScanReport {
     public var items: [BackgroundItem]
     public var uncorrelated: [String]
     public var warnings: [String]
-    /// Environment/self-check lines for `btmctl doctor`.
+    /// Environment/self-check lines for `launchkeeper doctor`.
     public var checks: [String]
     /// Sources that contribute ITEMS and did not answer in this run
     /// (`launchctl print <domain>`, `sfltool dumpbtm`). Display ids are
@@ -116,8 +116,9 @@ public struct ScanCoordinator {
             // One attempt, no blind retry: sfltool either answers within seconds
             // or is stuck — cold start after an OS upgrade, sandbox, permissions.
             // A blind second attempt only doubles the dead wait; the warning
-            // names the causes and the user decides. Budget: BTMCTL_BTM_TIMEOUT.
-            let budget = ProcessInfo.processInfo.environment["BTMCTL_BTM_TIMEOUT"]
+            // names the causes and the user decides. Budget: LAUNCHKEEPER_BTM_TIMEOUT.
+            let environment = ProcessInfo.processInfo.environment
+            let budget = (environment["LAUNCHKEEPER_BTM_TIMEOUT"] ?? environment["BTMCTL_BTM_TIMEOUT"])
                 .flatMap { Double($0) } ?? 45
             let result = env.runner.run(command: "/usr/bin/sfltool",
                                         arguments: ["dumpbtm"], timeout: budget)
@@ -140,7 +141,7 @@ public struct ScanCoordinator {
                     + "upgrade (the BTM daemon is migrating its store — simply run "
                     + "again) or a blocked call (sandbox/permissions). Check with "
                     + "`sfltool dumpbtm` yourself; raise the budget with "
-                    + "BTMCTL_BTM_TIMEOUT=<seconds>")
+                    + "LAUNCHKEEPER_BTM_TIMEOUT=<seconds>")
                 checks.append("sfltool dumpbtm: FAILED (timeout \(Int(budget))s)")
                 incomplete.append("sfltool dumpbtm")
             } else {

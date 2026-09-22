@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 /// Core invariant under test: a BTM entry is NOT one plist. One component may
 /// be backed by plist + launchd + BTM at once and must collapse to exactly one
@@ -131,7 +131,7 @@ final class PercentEncodedBundleProbeTests: XCTestCase {
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-pct-\(UUID().uuidString)", isDirectory: true).path
+            .appendingPathComponent("launchkeeper-pct-\(UUID().uuidString)", isDirectory: true).path
         try FileManager.default.createDirectory(
             atPath: root + "/Applications/My App.app/Contents/PlugIns/My QL Extension.appex",
             withIntermediateDirectories: true)

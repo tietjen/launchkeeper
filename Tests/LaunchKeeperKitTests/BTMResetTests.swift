@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 // V0.4b guarded-resetbtm tests. HERMETIC: the "BTM database" is a stateful
 // in-memory double behind the runner seam (dumpbtm/archive/resetbtm all go
@@ -82,7 +82,7 @@ final class BTMResetTests: XCTestCase {
         super.setUp()
         fm = FileManager.default
         root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-reset-\(UUID().uuidString)", isDirectory: true).path
+            .appendingPathComponent("launchkeeper-reset-\(UUID().uuidString)", isDirectory: true).path
         try? fm.createDirectory(atPath: root, withIntermediateDirectories: true)
         snapshotsRoot = root + "/snapshots"
     }

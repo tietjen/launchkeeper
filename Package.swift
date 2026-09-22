@@ -2,23 +2,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "btmctl",
+    name: "launchkeeper",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.4.0")
     ],
     targets: [
-        .target(name: "BTMKit"),
+        .target(name: "LaunchKeeperKit"),
         .executableTarget(
-            name: "btmctl",
+            name: "launchkeeper",
             dependencies: [
-                "BTMKit",
+                "LaunchKeeperKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
         .testTarget(
-            name: "BTMKitTests",
-            dependencies: ["BTMKit"]
+            name: "LaunchKeeperKitTests",
+            dependencies: ["LaunchKeeperKit"]
         ),
     ]
 )

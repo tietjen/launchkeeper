@@ -92,8 +92,8 @@ public enum TableRenderer {
     }
 }
 
-/// Detail block for `btmctl inspect <id>`. Includes read-only follow-up
-/// commands the USER may run — btmctl itself never executes them.
+/// Detail block for `launchkeeper inspect <id>`. Includes read-only follow-up
+/// commands the USER may run — launchkeeper itself never executes them.
 public enum InspectRenderer {
     public static func render(_ item: BackgroundItem, uid: Int) -> String {
         var lines: [String] = []
@@ -152,7 +152,7 @@ public enum InspectRenderer {
         if let label = item.label, !label.hasPrefix("com.apple."),
            !(item.path ?? "").hasPrefix("/System"),
            !(item.executable.map { PathUtils.canonicalize($0).hasPrefix("/System") } ?? false) {
-            let hint = item.enabled ? "btmctl disable \(item.id)" : "btmctl enable \(item.id)"
+            let hint = item.enabled ? "launchkeeper disable \(item.id)" : "launchkeeper enable \(item.id)"
             lines.append("    \(hint) — reversible override (dry-run first, --apply executes)")
         }
         return lines.joined(separator: "\n")

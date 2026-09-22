@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 /// The ONE place where tests spawn a real process: the interactive seam
 /// itself. Everything else stays behind test doubles. The child is always
@@ -32,7 +32,7 @@ final class SystemCommandRunnerInteractiveTests: XCTestCase {
     }
 
     func testSpawnFailureIsMinusOne() {
-        XCTAssertEqual(runner.runInteractive(command: "/nonexistent/btmctl-no-such-binary",
+        XCTAssertEqual(runner.runInteractive(command: "/nonexistent/launchkeeper-no-such-binary",
                                              arguments: [], timeout: 5), -1)
     }
 

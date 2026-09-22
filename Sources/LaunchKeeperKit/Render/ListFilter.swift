@@ -1,6 +1,6 @@
 import Foundation
 
-/// Declarative row filter for `btmctl list`. All conditions AND together.
+/// Declarative row filter for `launchkeeper list`. All conditions AND together.
 public struct ListFilter {
     public var orphansOnly = false
     public var runningOnly = false

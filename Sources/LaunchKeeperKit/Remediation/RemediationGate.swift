@@ -41,7 +41,7 @@ public enum RemediationGate {
                 + "plist, no launchd job) — nothing here to \(operation.rawValue). sfltool has "
                 + "no per-item delete; the record is inert and BTM drops it in its own "
                 + "housekeeping (seen live within minutes after the plist went), "
-                + "otherwise `btmctl resetbtm`")
+                + "otherwise `launchkeeper resetbtm`")
         }
         // Defense in depth: /System territory is refused even with --apply/sudo.
         for probe in [item.path, item.executable].compactMap({ $0 }) {
@@ -55,7 +55,7 @@ public enum RemediationGate {
     /// V0.3 file-removal policy — deliberately in the SAME gate, so "one gate,
     /// no bypass" stays literally true. Runs after `evaluate` (the Apple and
     /// /System rules above cover `remove` too). Four independent locks, all
-    /// fail-closed. The last one is what keeps btmctl from becoming an
+    /// fail-closed. The last one is what keeps launchkeeper from becoming an
     /// `rm`-wrapper: a working component gets DISABLED (reversible), never
     /// deleted — anything that is not provably broken is not touched.
     public static func evaluateRemove(item: BackgroundItem,

@@ -41,8 +41,7 @@ public struct BTMResetEnvironment {
         self.runner = runner
         self.fileManager = fileManager
         self.home = home
-        self.snapshotsRoot = snapshotsRoot ?? home
-            + "/Library/Application Support/btmctl/btm-snapshots"
+        self.snapshotsRoot = snapshotsRoot ?? LaunchKeeperPaths.btmSnapshots(home: home)
         self.btmTimeout = btmTimeout
     }
 }

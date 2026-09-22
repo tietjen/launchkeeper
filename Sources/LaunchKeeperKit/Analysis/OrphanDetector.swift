@@ -78,7 +78,7 @@ public struct OrphanDetector {
                let path = item.path, path.hasPrefix("/"), path.hasSuffix(".plist"),
                !PathUtils.exists(path, fileManager: fileManager) {
                 reasons = ["BTM leftover: plist already gone (\(path)) — nothing to remove; "
-                    + "BTM prunes the record itself, otherwise `btmctl resetbtm`"]
+                    + "BTM prunes the record itself, otherwise `launchkeeper resetbtm`"]
                 confidence = .low
                 item.metadata["btm-leftover"] = "true"
             }

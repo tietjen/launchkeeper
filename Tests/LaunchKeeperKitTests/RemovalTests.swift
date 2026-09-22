@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 // V0.3 remove tests. The deletion path is tested HERMETICALLY: every file
 // operation happens inside a temp tree, every launchctl read/write against
@@ -95,7 +95,7 @@ private func makeRemoveFixture(home: String, entries: [(name: String, args: [Str
 
 private func tempRoot(_ tag: String) -> String {
     FileManager.default.temporaryDirectory
-        .appendingPathComponent("btmctl-removal-tests-\(tag)-\(UUID().uuidString)", isDirectory: true).path
+        .appendingPathComponent("launchkeeper-removal-tests-\(tag)-\(UUID().uuidString)", isDirectory: true).path
 }
 
 private let ghostArgs = ["/bin/bash", "/nonexistent-xyz-dir/gone.sh"]
@@ -154,7 +154,7 @@ final class RemovalGateTests: XCTestCase {
     }
 
     func testNonOrphanRefused() {
-        // The lock that keeps btmctl out of rm-wrapper territory: a working
+        // The lock that keeps launchkeeper out of rm-wrapper territory: a working
         // component leaves via disable, never via deletion.
         guard case .denied(let reason) =
                 RemediationGate.evaluateRemove(
@@ -263,7 +263,7 @@ final class RemovalPlannerTests: XCTestCase {
         var item = user(loaded: false)
         item.id = "07"   // ids are positional per run — the hint must NOT use it
         let hint = RemediationPlanner.undoHint(for: .remove, item: item)
-        XCTAssertEqual(hint, "btmctl restore <pre-remove backup> && btmctl enable com.example.script --now",
+        XCTAssertEqual(hint, "launchkeeper restore <pre-remove backup> && launchkeeper enable com.example.script --now",
                        "for remove the undo hint IS the recovery path — "
                        + "it must address the entry by its stable label")
     }
@@ -274,8 +274,8 @@ final class RemovalPlannerTests: XCTestCase {
 final class RemovalExecutorTests: XCTestCase {
     private func ghostItem(path: String, loaded: Bool, enabled: Bool = true,
                            domain: ItemDomain = .user) -> BackgroundItem {
-        BackgroundItem(key: "de.btmctl.ghost", displayName: "de.btmctl.ghost",
-                       path: path, label: "de.btmctl.ghost",
+        BackgroundItem(key: "de.launchkeeper.ghost", displayName: "de.launchkeeper.ghost",
+                       path: path, label: "de.launchkeeper.ghost",
                        executable: "/bin/bash", domain: domain,
                        loaded: loaded, enabled: enabled, orphaned: true)
     }
@@ -283,19 +283,19 @@ final class RemovalExecutorTests: XCTestCase {
     private func writeFile(_ path: String) throws {
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
                                                 withIntermediateDirectories: true)
-        try Data(plistBody(label: "de.btmctl.ghost", programArguments: ghostArgs)
+        try Data(plistBody(label: "de.launchkeeper.ghost", programArguments: ghostArgs)
             .utf8).write(to: URL(fileURLWithPath: path))
     }
 
     func testHappyPathDeletesFileAndClearsState() throws {
         let root = tempRoot("exec-happy")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let plist = root + "/LaunchAgents/de.btmctl.ghost.plist"
+        let plist = root + "/LaunchAgents/de.launchkeeper.ghost.plist"
         try writeFile(plist)
 
         let runner = RemovalRunner()
-        runner.launchd.services["de.btmctl.ghost"] = 999
-        runner.launchd.disabled.insert("de.btmctl.ghost")
+        runner.launchd.services["de.launchkeeper.ghost"] = 999
+        runner.launchd.disabled.insert("de.launchkeeper.ghost")
         let executor = RemediationExecutor(runner: runner, uid: 501)
         let item = ghostItem(path: plist, loaded: true, enabled: false)
 
@@ -305,8 +305,8 @@ final class RemovalExecutorTests: XCTestCase {
 
         XCTAssertEqual(outcome.status, .appliedOk, "actual: \(outcome.status) \(outcome.messages)")
         XCTAssertFalse(FileManager.default.fileExists(atPath: plist), "file must be really gone")
-        XCTAssertFalse(runner.launchd.services.keys.contains("de.btmctl.ghost"))
-        XCTAssertFalse(runner.launchd.disabled.contains("de.btmctl.ghost"),
+        XCTAssertFalse(runner.launchd.services.keys.contains("de.launchkeeper.ghost"))
+        XCTAssertFalse(runner.launchd.disabled.contains("de.launchkeeper.ghost"),
                        "stale override must be dropped after removal")
         XCTAssertFalse(runner.log.contains { $0.contains("sudo") },
                        "user domain never goes through sudo: \(runner.log)")
@@ -318,7 +318,7 @@ final class RemovalExecutorTests: XCTestCase {
         // "silent fake" test exists for.
         let root = tempRoot("exec-silent")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let plist = root + "/LaunchAgents/de.btmctl.ghost.plist"
+        let plist = root + "/LaunchAgents/de.launchkeeper.ghost.plist"
         try writeFile(plist)
 
         let runner = RemovalRunner()
@@ -341,7 +341,7 @@ final class RemovalExecutorTests: XCTestCase {
         // plan at the rm step — the executor may not improvise a substitute.
         let fake = FakeLaunchd()
         let executor = RemediationExecutor(runner: fake, uid: 501)
-        let item = ghostItem(path: "/Users/test/Library/LaunchAgents/de.btmctl.ghost.plist",
+        let item = ghostItem(path: "/Users/test/Library/LaunchAgents/de.launchkeeper.ghost.plist",
                              loaded: false)
         let outcome = executor.execute(
             RemediationPlanner.plan(operation: .remove, item: item, uid: 501),
@@ -353,11 +353,11 @@ final class RemovalExecutorTests: XCTestCase {
     func testSystemDomainRemoveUsesInteractiveSudoSeam() throws {
         let root = tempRoot("exec-system")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let plist = root + "/FakeDaemons/de.btmctl.ghost.plist"
+        let plist = root + "/FakeDaemons/de.launchkeeper.ghost.plist"
         try writeFile(plist)
 
         let runner = RemovalRunner()
-        runner.launchd.services["de.btmctl.ghost"] = 4242
+        runner.launchd.services["de.launchkeeper.ghost"] = 4242
         let executor = RemediationExecutor(runner: runner, uid: 501)
         let item = ghostItem(path: plist, loaded: true, domain: .system)
         // The temp FakeDaemons dir stands in for a root-owned launch dir:
@@ -370,7 +370,7 @@ final class RemovalExecutorTests: XCTestCase {
         XCTAssertEqual(outcome.status, .appliedOk, "actual: \(outcome.status) \(outcome.messages)")
         XCTAssertTrue(runner.interactiveLog.contains("/usr/bin/sudo rm -- \(plist)"),
                       "delete must ride the interactive seam: \(runner.interactiveLog)")
-        XCTAssertTrue(runner.interactiveLog.contains("/usr/bin/sudo launchctl bootout system/de.btmctl.ghost"))
+        XCTAssertTrue(runner.interactiveLog.contains("/usr/bin/sudo launchctl bootout system/de.launchkeeper.ghost"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: plist))
     }
 }
@@ -417,14 +417,14 @@ final class RemovalEngineTests: XCTestCase {
     }
 
     func testDryRunShowsPlanAndTouchesNothing() throws {
-        let setup = try makeSetup(entries: [("de.btmctl.ghost", ghostArgs)])
+        let setup = try makeSetup(entries: [("de.launchkeeper.ghost", ghostArgs)])
         defer { try? FileManager.default.removeItem(atPath: setup.root) }
-        let plist = setup.agents + "/de.btmctl.ghost.plist"
+        let plist = setup.agents + "/de.launchkeeper.ghost.plist"
 
-        let result = setup.engine.run(operation: .remove, target: "de.btmctl.ghost",
+        let result = setup.engine.run(operation: .remove, target: "de.launchkeeper.ghost",
                                       apply: false, scanOptions: userOnly)
         XCTAssertEqual(result.status, .planned)
-        XCTAssertEqual(result.target, "gui/501/de.btmctl.ghost \(plist)",
+        XCTAssertEqual(result.target, "gui/501/de.launchkeeper.ghost \(plist)",
                        "a deletion audit line must name the exact file")
         XCTAssertEqual(result.plan.map(\.display), ["/bin/rm -- \(plist)"])
         XCTAssertTrue(result.messages.contains { $0.contains("backup would be created first") })
@@ -436,16 +436,16 @@ final class RemovalEngineTests: XCTestCase {
     }
 
     func testApplyRequiresBackupAndDeletesOnTopOfIt() throws {
-        let setup = try makeSetup(entries: [("de.btmctl.ghost", ghostArgs)],
-                                  services: ["de.btmctl.ghost": 777])
+        let setup = try makeSetup(entries: [("de.launchkeeper.ghost", ghostArgs)],
+                                  services: ["de.launchkeeper.ghost": 777])
         defer { try? FileManager.default.removeItem(atPath: setup.root) }
-        let plist = setup.agents + "/de.btmctl.ghost.plist"
+        let plist = setup.agents + "/de.launchkeeper.ghost.plist"
 
-        let result = setup.engine.run(operation: .remove, target: "de.btmctl.ghost",
+        let result = setup.engine.run(operation: .remove, target: "de.launchkeeper.ghost",
                                       apply: true, scanOptions: userOnly)
         XCTAssertEqual(result.status, .appliedOk, "actual: \(result.status) \(result.messages)")
         XCTAssertFalse(FileManager.default.fileExists(atPath: plist))
-        XCTAssertFalse(setup.runner.launchd.services.keys.contains("de.btmctl.ghost"),
+        XCTAssertFalse(setup.runner.launchd.services.keys.contains("de.launchkeeper.ghost"),
                        "loaded job must be booted out before its file goes")
 
         let snapshots = snapshotNames(setup)
@@ -458,7 +458,7 @@ final class RemovalEngineTests: XCTestCase {
 
         let audit = setup.engine.audit.readAll()
         XCTAssertTrue(audit.contains("backup \(name) pre-remove"), "actual audit:\n\(audit)")
-        XCTAssertTrue(audit.contains("remove gui/501/de.btmctl.ghost \(plist) applied-ok"),
+        XCTAssertTrue(audit.contains("remove gui/501/de.launchkeeper.ghost \(plist) applied-ok"),
                       "actual audit:\n\(audit)")
         XCTAssertFalse(setup.runner.log.contains { $0.contains("sudo") })
     }
@@ -471,7 +471,7 @@ final class RemovalEngineTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: root) }
         let home = root + "/home"
         let agents = home + "/Library/LaunchAgents"
-        try makeRemoveFixture(home: home, entries: [("de.btmctl.ghost", ghostArgs)])
+        try makeRemoveFixture(home: home, entries: [("de.launchkeeper.ghost", ghostArgs)])
         try Data("not a directory".utf8)
             .write(to: URL(fileURLWithPath: root + "/blocked"))
 
@@ -481,9 +481,9 @@ final class RemovalEngineTests: XCTestCase {
                                          backupsRoot: root + "/blocked")
         let engine = RemediationEngine(environment: env,
                                        audit: AuditLog(directory: home + "/logs"))
-        let plist = agents + "/de.btmctl.ghost.plist"
+        let plist = agents + "/de.launchkeeper.ghost.plist"
 
-        let result = engine.run(operation: .remove, target: "de.btmctl.ghost",
+        let result = engine.run(operation: .remove, target: "de.launchkeeper.ghost",
                                 apply: true, scanOptions: userOnly)
         guard case .refused(let reason) = result.status, reason.contains("backup failed") else {
             return XCTFail("expected backup-failure refusal, got \(result.status)")
@@ -529,12 +529,12 @@ final class RemovalEngineTests: XCTestCase {
     func testRemoveThenRestoreRoundTrip() throws {
         // The undo story must actually work: delete for real, then bring the
         // file back from the pre-remove snapshot.
-        let setup = try makeSetup(entries: [("de.btmctl.ghost", ghostArgs)])
+        let setup = try makeSetup(entries: [("de.launchkeeper.ghost", ghostArgs)])
         defer { try? FileManager.default.removeItem(atPath: setup.root) }
-        let plist = setup.agents + "/de.btmctl.ghost.plist"
+        let plist = setup.agents + "/de.launchkeeper.ghost.plist"
         let original = try Data(contentsOf: URL(fileURLWithPath: plist))
 
-        let result = setup.engine.run(operation: .remove, target: "de.btmctl.ghost",
+        let result = setup.engine.run(operation: .remove, target: "de.launchkeeper.ghost",
                                       apply: true, scanOptions: userOnly)
         XCTAssertEqual(result.status, .appliedOk, "actual: \(result.status) \(result.messages)")
         XCTAssertFalse(FileManager.default.fileExists(atPath: plist))
@@ -587,7 +587,7 @@ final class FilelessRemoveRefusalTests: XCTestCase {
             return XCTFail("expected refusal, got \(result.status)")
         }
         XCTAssertTrue(reason.hasPrefix("no backing file — nothing to remove"), reason)
-        XCTAssertTrue(reason.contains("btmctl disable com.example.zombie --apply"),
+        XCTAssertTrue(reason.contains("launchkeeper disable com.example.zombie --apply"),
                       "refusal must name the working command: \(reason)")
         XCTAssertTrue(reason.contains("gui/501/com.example.zombie"), reason)
         XCTAssertFalse(runner.log.contains { $0.contains("rm ") }, "nothing may run: \(runner.log)")

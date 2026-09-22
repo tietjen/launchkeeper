@@ -15,21 +15,30 @@ public struct BackupEnvironment {
     /// Prefixes whose restores go through `sudo cp` (interactive seam) instead of direct writes.
     public var systemDirPrefixes: [String]
     public var backupsRoot: String
+    /// Roots that are only READ (restore looks there when a snapshot is not
+    /// under `backupsRoot`): the btmctl-era backups directory. New snapshots
+    /// always land in `backupsRoot`.
+    public var legacyBackupsRoots: [String]
     public var runner: CommandRunner
     public var fileManager: FileManager
     public var uid: Int
     public var toolVersion: String
 
     public init(launchDirs: [String]? = nil, systemDirPrefixes: [String]? = nil,
-                backupsRoot: String? = nil, runner: CommandRunner = SystemCommandRunner(),
+                backupsRoot: String? = nil, legacyBackupsRoots: [String]? = nil,
+                runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default, home: String = NSHomeDirectory(),
-                uid: Int = -1, toolVersion: String = "0.4.5") {
+                uid: Int = -1, toolVersion: String = "0.5.0") {
         self.launchDirs = launchDirs ?? [
             home + "/Library/LaunchAgents", home + "/Library/LaunchDaemons",
             "/Library/LaunchAgents", "/Library/LaunchDaemons",
         ]
         self.systemDirPrefixes = systemDirPrefixes ?? ["/Library/LaunchAgents", "/Library/LaunchDaemons"]
-        self.backupsRoot = backupsRoot ?? home + "/Library/Application Support/btmctl/backups"
+        self.backupsRoot = backupsRoot ?? LaunchKeeperPaths.backups(home: home)
+        // Only the DEFAULT root inherits the legacy location; explicit roots
+        // (tests, custom setups) stay exactly where they point.
+        self.legacyBackupsRoots = legacyBackupsRoots
+            ?? (backupsRoot == nil ? [LaunchKeeperPaths.legacyBackups(home: home)] : [])
         self.runner = runner
         self.fileManager = fileManager
         self.uid = uid >= 0 ? uid : Int(getuid())
@@ -207,7 +216,13 @@ public struct BackupService {
         if name.contains("..") || nameComponents.count != 1 {
             return .failure(BackupFailure("backup name must not contain path separators"))
         }
-        let dir = env.backupsRoot + "/" + name
+        // The current root first, then the btmctl-era root — a snapshot
+        // written before the rename must still restore.
+        let fm = env.fileManager
+        let dir = ([env.backupsRoot] + env.legacyBackupsRoots)
+            .map { $0 + "/" + name }
+            .first { fm.fileExists(atPath: $0 + "/manifest.json") }
+            ?? env.backupsRoot + "/" + name
         let filesDir = dir + "/files"
         let manifestURL = URL(fileURLWithPath: dir + "/manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),

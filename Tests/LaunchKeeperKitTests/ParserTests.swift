@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 final class BTMDumpParserTests: XCTestCase {
     private var text: String { Fixtures.text("dumpbtm-nosudo.txt") }
@@ -72,7 +72,7 @@ final class LaunchctlParserTests: XCTestCase {
         let records = LaunchctlParser.parsePrint(Fixtures.text("launchctl-gui.txt"), domainKind: "gui")
         XCTAssertGreaterThan(records.count, 100)
 
-        // Not-running line shape: "0   0   com.vendorkit...ShipIt" (pid token 0).
+        // Not-running line shape: "0   0   com.vendorkit...Updater" (pid token 0).
         let shipIt = records.first { $0.label == "com.vendorkit.a1b2c3d4e5f6g7h.Updater" }
         XCTAssertNotNil(shipIt)
         XCTAssertNil(shipIt?.pid, "pid token 0 means not running")
@@ -118,7 +118,7 @@ final class PlistReaderTests: XCTestCase {
 
     func testMalformedFileThrows() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("launchkeeper-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let bad = dir.appendingPathComponent("com.example.bad.plist")
         try Data("this is not a plist at all".utf8).write(to: bad)

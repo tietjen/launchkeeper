@@ -1,5 +1,5 @@
 import XCTest
-@testable import BTMKit
+@testable import LaunchKeeperKit
 
 // V0.2 remediation tests. Two fakes make the write paths testable WITHOUT
 // ever touching real launchd or real system directories:
@@ -126,7 +126,7 @@ final class CopyRunner: CommandRunner {
 
 private func makeUserHome(withPlists names: [String]) throws -> String {
     let dir = FileManager.default.temporaryDirectory
-        .appendingPathComponent("btmctl-remediation-tests-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("launchkeeper-remediation-tests-\(UUID().uuidString)", isDirectory: true)
     let agents = dir.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
     try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
     for name in names {
@@ -433,7 +433,7 @@ final class RemediationEngineTests: XCTestCase {
         XCTAssertEqual(result.status, .appliedOk)
         XCTAssertTrue(fake.disabled.contains("com.example.script"))
         XCTAssertFalse(fake.services.keys.contains("com.example.script"))
-        XCTAssertEqual(result.undoHint, "btmctl enable com.example.script",
+        XCTAssertEqual(result.undoHint, "launchkeeper enable com.example.script",
                        "reversibility hint must carry the stable label — "
                        + "display ids are positional per scan run and would resolve "
                        + "to a different entry when executed later")
@@ -491,13 +491,13 @@ final class AuditLogTests: XCTestCase {
                                        operation: "disable",
                                        target: "gui/501/com.example.script",
                                        status: "planned")
-        XCTAssertTrue(line.hasPrefix("[1970-01-01T00:00:00Z] btmctl disable gui/501/com.example.script planned"),
+        XCTAssertTrue(line.hasPrefix("[1970-01-01T00:00:00Z] launchkeeper disable gui/501/com.example.script planned"),
                       "actual: \(line)")
     }
 
     func testAppendCreatesAndExtends() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-audit-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("launchkeeper-audit-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(atPath: dir.path) }
         let log = AuditLog(directory: dir.path)
         XCTAssertNil(log.append(operation: "backup", target: "snapshot-1", status: "applied-ok"))
@@ -520,7 +520,7 @@ final class BackupServiceTests: XCTestCase {
 
     private func makeSetup(runner: CommandRunner = CopyRunner()) throws -> TestSetup {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("btmctl-backup-tests-\(UUID().uuidString)", isDirectory: true).path
+            .appendingPathComponent("launchkeeper-backup-tests-\(UUID().uuidString)", isDirectory: true).path
         let fm = FileManager.default
         let userDir = root + "/user-launch"
         let sysDir = root + "/fake-system"
@@ -925,5 +925,71 @@ final class IncompleteInventoryIdGuardTests: XCTestCase {
             .run(operation: .disable, target: "01", apply: false, scanOptions: withBTM)
         XCTAssertEqual(result.status, .planned, "\(result.messages)")
         XCTAssertEqual(result.target, "gui/501/com.example.alpha")
+    }
+}
+
+// MARK: - V0.5.0: the rename btmctl -> launchkeeper must not orphan user state
+
+final class RenameMigrationTests: XCTestCase {
+    private func tempHome() -> String {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("lk-migrate-\(UUID().uuidString)", isDirectory: true).path
+    }
+
+    func testLegacyAuditLogIsCarriedOverOnce() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let legacyDir = LaunchKeeperPaths.legacyLogs(home: home)
+        try FileManager.default.createDirectory(atPath: legacyDir, withIntermediateDirectories: true)
+        let oldLine = "[2026-09-17T08:08:09Z] btmctl remove gui/501/x applied-ok\n"
+        try Data(oldLine.utf8).write(to: URL(fileURLWithPath: legacyDir + "/operations.log"))
+
+        let audit = AuditLog(directory: LaunchKeeperPaths.logs(home: home))
+        let carried = audit.readAll()
+        XCTAssertTrue(carried.hasPrefix(oldLine), carried)
+        XCTAssertTrue(carried.contains("launchkeeper migrate"), carried)
+        XCTAssertEqual(try String(contentsOfFile: legacyDir + "/operations.log", encoding: .utf8), oldLine,
+                       "the old file stays untouched")
+
+        audit.append(operation: "disable", target: "gui/501/y", status: "planned")
+        let again = AuditLog(directory: LaunchKeeperPaths.logs(home: home)).readAll()
+        XCTAssertEqual(again.components(separatedBy: "launchkeeper migrate").count, 2, "carry-over happens once")
+        XCTAssertTrue(again.hasSuffix("planned\n"), again)
+    }
+
+    func testNoCarryOverForCustomDirectories() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let legacyDir = LaunchKeeperPaths.legacyLogs(home: home)
+        try FileManager.default.createDirectory(atPath: legacyDir, withIntermediateDirectories: true)
+        try Data("[t] btmctl x y z\n".utf8).write(to: URL(fileURLWithPath: legacyDir + "/operations.log"))
+        XCTAssertEqual(AuditLog(directory: home + "/logs").readAll(), "", "only the standard dir migrates")
+    }
+
+    func testRestoreFindsSnapshotInLegacyRoot() throws {
+        let root = tempHome()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let legacy = root + "/old/2026-09-17-080809Z-pre-remove"
+        try FileManager.default.createDirectory(atPath: legacy + "/files", withIntermediateDirectories: true)
+        let manifest = BackupManifest(createdAt: "2026-09-17T08:08:09Z", toolVersion: "0.4.5", entries: [])
+        try JSONEncoder().encode(manifest).write(to: URL(fileURLWithPath: legacy + "/manifest.json"))
+        let env = BackupEnvironment(launchDirs: [root + "/agents"], backupsRoot: root + "/new",
+                                    legacyBackupsRoots: [root + "/old"],
+                                    runner: ScriptedCommandRunner(), home: root, uid: 501)
+        guard case .success(let report) = BackupService(env: env).restore(name: "2026-09-17-080809Z-pre-remove") else {
+            return XCTFail("a btmctl-era snapshot must still be found")
+        }
+        XCTAssertTrue(report.wouldRestore.isEmpty && report.refused.isEmpty && report.failed.isEmpty)
+        guard case .failure = BackupService(env: env).restore(name: "nope") else {
+            return XCTFail("unknown snapshot must still fail")
+        }
+    }
+
+    func testDefaultEnvironmentInheritsLegacyRootOnlyByDefault() {
+        let standard = BackupEnvironment(home: "/Users/x")
+        XCTAssertEqual(standard.backupsRoot, "/Users/x/Library/Application Support/launchkeeper/backups")
+        XCTAssertEqual(standard.legacyBackupsRoots, ["/Users/x/Library/Application Support/btmctl/backups"])
+        let explicit = BackupEnvironment(backupsRoot: "/tmp/b", home: "/Users/x")
+        XCTAssertEqual(explicit.legacyBackupsRoots, [], "an explicit root never looks elsewhere")
     }
 }
