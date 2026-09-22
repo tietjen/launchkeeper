@@ -63,7 +63,7 @@ Remediation rules, enforced in code (not docs):
 ## Installation (macOS 14+)
 
 btmctl is one universal CLI binary (Apple silicon + Intel), signed with a
-Developer ID. Test releases are published on Gitea:
+Developer ID and notarized by Apple. Test releases are published on Gitea:
 <https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases>
 (the repository is private while the tool is in multi-device testing, so a
 Gitea login or personal access token is required).
@@ -98,10 +98,12 @@ Gitea login or personal access token is required).
    The first `doctor` after a macOS upgrade may report the BTM layer as
    timed out — the BTM daemon is migrating its store; run it again.
 
-**If you downloaded with a browser** (Safari, Finder): the file carries the
-quarantine flag. The test builds are Developer-ID-signed but not yet
-notarized, so Gatekeeper will refuse a quarantined copy. Clear the flag
-before installing:
+**Downloaded with a browser** (Safari, Finder)? The file carries the
+quarantine flag, and Gatekeeper then checks Apple's notarization ticket
+online — the v0.4.1 binary is notarized (submission accepted 2026-09-22),
+so it passes. A bare CLI binary cannot carry a stapled ticket, so an
+offline first run, or a copy made before the notarization run, may still
+be refused; clear the flag before installing in that case:
 ```
 xattr -d com.apple.quarantine btmctl-v0.4.1-macos-universal/btmctl
 ```
@@ -125,6 +127,9 @@ sudo install -m 755 .build/release/btmctl /usr/local/bin/btmctl
 ```
 scripts/release.sh 0.4.1                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
 scripts/release.sh 0.4.1 --notarize       # + Apple notarization (keychain profile, see script header)
+# Notarize an already-shipped binary later (same bytes → same ticket, no re-release):
+#   tar -xzf dist/btmctl-v0.4.1-macos-universal.tar.gz && ditto -c -k --keepParent btmctl-v0.4.1-macos-universal/btmctl n.zip
+#   xcrun notarytool submit n.zip --keychain-profile SparkMenu --wait
 scripts/release.sh 0.4.1 --upload         # + tag v0.4.1, Gitea release with assets (rbw must be unlocked)
 ```
 
