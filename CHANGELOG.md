@@ -5,7 +5,19 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.3
+## [Unreleased] — 0.5.4
+
+### Added
+- App extensions: `pluginkit -mAvv` is a scan source. Every registered
+  extension (QuickLook, Spotlight, Share, widgets, Finder Sync, notification
+  services, …) becomes an item of category `app-extensions` with its user
+  election (`use` / `ignore` / `none`), extension point and host app;
+  extensions that Background Task Management also lists merge with their
+  BTM record by bundle path. A failed `pluginkit` call marks the inventory
+  incomplete. The election is read-only until V0.7. Anonymized fixture
+  (510 extensions, 34 elected) and 8 tests.
+
+## [0.5.3] — 2026-09-22
 
 ### Fixed
 - `background`: developer rows carry their name as their identifier

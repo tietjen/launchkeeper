@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.3)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.4)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -179,6 +179,8 @@ launchkeeper doctor --json           # machine-readable health report
 
 # V0.5 — the Autoruns-style dimensions
 launchkeeper list --category <name>  # one category: launch-items, login-items, app-extensions, …
+launchkeeper list --category app-extensions   # pluginkit: QuickLook, Share, Widgets, Finder Sync, …
+                                     # with the user election (use / ignore / none) and the host app
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -285,7 +287,7 @@ failed, it says so instead of pretending the inventory is complete.
 Every item carries three more dimensions, visible in `inspect` and `--json`:
 
 - **category** — the Autoruns-style tab it belongs to (`launch-items`,
-  `login-items`, `app-extensions`, …; more scanners follow in V0.5.x).
+  `login-items`, `app-extensions`; more scanners follow in V0.5.x).
   `list --category <name>` filters by it.
 - **control** — what launchkeeper can do with it, computed from the *same*
   gate the mutating commands consult: `reversible` (disable/enable),
@@ -317,11 +319,27 @@ Extensions pane, verified against the pane itself (V0.5.2):
 launchkeeper never writes to Background Task Management; the switch stays
 in System Settings.
 
+## App extensions (V0.5.4)
+
+`pluginkit -mAvv` lists every registered app extension — QuickLook and
+Spotlight plug-ins, Share and Action extensions, widgets, Finder Sync,
+notification services, Safari app extensions — with the user's election
+(`+` use, `-` ignore, no tag = default). launchkeeper turns them into items
+of category `app-extensions`: extensions that Background Task Management
+also lists (QuickLook, Spotlight, dock tiles) merge with their BTM record by
+bundle path, the rest become their own entries; `inspect` shows the
+extension point (`ext-sdk`), election and host app. Apple's own extensions
+are hidden from the default `list` like other Apple internals (`--all`).
+The election itself is read-only here (`pluginkit -e use|ignore -i <id>`);
+launchkeeper control follows in V0.7. A failed `pluginkit` call marks the
+inventory incomplete, like a failed BTM dump.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
     launchctl print (live)   ──┤→ Correlation ──→ Orphan + Risk analysis
     sfltool dumpbtm (BTM)    ──┤     ↓                    ↓
+    pluginkit -mAvv          ──┤
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
     .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
                                      Spotlight confirmation)
@@ -374,7 +392,7 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 188-test suite includes the V0.2 write
+macOS 26.6.2 without sudo). The 200-test suite includes the V0.2 write
 paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
 not manufacture a gone-verdict" property) and the guarded `resetbtm`
@@ -443,6 +461,11 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.4** ✅ — app extensions via `pluginkit -mAvv` as category
+  `app-extensions`, merged with the BTM extension records by bundle path,
+  election and extension point on every item, incomplete-marking on failure
+- **V0.5.3** ✅ — `background` keeps developer row names, unnamed
+  registrations one row per component
 - **V0.5.2** ✅ — `background` verified against the System Settings pane:
   the switch is the components' BTM bit, launchd overrides get their own
   column, app-level registrations are the Open-at-Login entries, unnamed

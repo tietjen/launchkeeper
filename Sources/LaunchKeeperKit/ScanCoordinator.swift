@@ -11,12 +11,16 @@ public struct ScanOptions: Sendable {
     public var includeSystem: Bool
     public var scanBTM: Bool
     public var scanSignatures: Bool
+    /// App extensions via `pluginkit -mAvv` (V0.5.4). Contributes items, so
+    /// a failure marks the inventory incomplete.
+    public var scanExtensions: Bool
     public init(includeUser: Bool = true, includeSystem: Bool = true,
-                scanBTM: Bool = true, scanSignatures: Bool = true) {
+                scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true) {
         self.includeUser = includeUser
         self.includeSystem = includeSystem
         self.scanBTM = scanBTM
         self.scanSignatures = scanSignatures
+        self.scanExtensions = scanExtensions
     }
 }
 
@@ -169,19 +173,38 @@ public struct ScanCoordinator {
                 checks.append("sfltool dumpbtm: FAILED (exit \(result.exitCode))")
                 incomplete.append("sfltool dumpbtm")
             }
-            if !incomplete.isEmpty {
-                warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
-                    + "ids are positional per scan and will not match a complete run: address "
-                    + "entries by label, not by number, until the scan is complete")
-            }
         } else {
             checks.append("sfltool dumpbtm: skipped")
+        }
+
+        // ---- Stage 3b: app extensions (pluginkit -mAvv). Contributes items.
+        var extensions: [AppExtensionRecord] = []
+        if options.scanExtensions {
+            let scan = PluginKitScanner(runner: env.runner).scan()
+            if scan.exitCode == 0 {
+                extensions = scan.records
+                let elected = extensions.filter { $0.election == .use }.count
+                checks.append("pluginkit: ok (\(extensions.count) extensions, \(elected) elected)")
+                warnings.append(contentsOf: scan.warnings.prefix(10))
+            } else {
+                warnings.append(contentsOf: scan.warnings)
+                checks.append("pluginkit: FAILED (exit \(scan.exitCode))")
+                incomplete.append("pluginkit")
+            }
+        } else {
+            checks.append("pluginkit: skipped")
+        }
+        if !incomplete.isEmpty {
+            warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
+                + "ids are positional per scan and will not match a complete run: address "
+                + "entries by label, not by number, until the scan is complete")
         }
 
         // ---- Stage 4: correlation.
         let correlator = ItemCorrelator(fileManager: env.fileManager)
         let (items, uncorrelated) = correlator.correlate(ItemCorrelator.Input(
-            jobs: jobs, launchd: launchd, btm: btm, disabled: disabled, uid: env.uid))
+            jobs: jobs, launchd: launchd, btm: btm, disabled: disabled, uid: env.uid,
+            extensions: extensions))
 
         // ---- Stage 5: signatures (enrichment).
         var enriched = items

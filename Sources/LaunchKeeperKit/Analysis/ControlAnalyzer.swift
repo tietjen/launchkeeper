@@ -20,6 +20,14 @@ public struct ControlAnalyzer {
     }
 
     public func evaluate(_ item: BackgroundItem) -> Controllability {
+        // App extensions: the user election lives in pluginkit; launchkeeper
+        // shows it and (until V0.7) stops there.
+        if item.sources.contains(where: { $0.kind == .pluginkit }) {
+            let id = item.bundleIdentifier ?? item.displayName
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "app extension — the user election is `pluginkit -e use|ignore -i \(id)` "
+                    + "(launchkeeper control follows in V0.7)")
+        }
         // Records that only Background Task Management manages (extensions,
         // login items without a launch plist): the switch is in System
         // Settings, launchkeeper shows it and stops there.

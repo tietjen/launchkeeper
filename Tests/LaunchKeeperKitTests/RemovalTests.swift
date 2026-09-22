@@ -379,7 +379,7 @@ final class RemovalExecutorTests: XCTestCase {
 
 final class RemovalEngineTests: XCTestCase {
     private let userOnly = ScanOptions(includeUser: true, includeSystem: false,
-                                       scanBTM: false, scanSignatures: false)
+                                       scanBTM: false, scanSignatures: false, scanExtensions: false)
 
     private struct Setup {
         var root: String
@@ -564,7 +564,7 @@ final class RemovalEngineTests: XCTestCase {
 
 final class FilelessRemoveRefusalTests: XCTestCase {
     private let userOnly = ScanOptions(includeUser: true, includeSystem: false,
-                                       scanBTM: false, scanSignatures: false)
+                                       scanBTM: false, scanSignatures: false, scanExtensions: false)
 
     /// The live case (2026-09-22): an app had been
     /// uninstalled, plist gone, launchd still holds the job for this login

@@ -27,7 +27,7 @@ import json, pathlib, re, random, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Tests" / "Fixtures"
 REAL = ROOT / "real"
-FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt"]
+FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt", "pluginkit.txt"]
 
 # Anchors the tests reference by name get fixed, readable pseudonyms. The
 # mapping itself names real identifiers, so it lives next to the real
@@ -156,8 +156,23 @@ def main(report=False):
     def disabled_line(line):
         return QUOTED.sub(lambda m: region(m.group(0)), line)
 
+    # pluginkit -mAvv: "<marker> <identifier>(<version>)" header lines and
+    # indented "Key = Value" lines. Identifiers, paths and names are regions;
+    # SDK (the Apple extension point), Platform and Timestamp are format.
+    PK_HEADER = re.compile(r"^([+\-!=?]?)(\s+)(\S+?)\(([^)]*)\)\s*$")
+    PK_FIELD = re.compile(r"^(\s*)(Path|Parent Bundle|Display Name|Short Name|Parent Name) = (.*)$")
+    def pluginkit_line(line):
+        m = PK_HEADER.match(line)
+        if m:
+            return m.group(1) + m.group(2) + region(m.group(3)) + "(" + m.group(4) + ")"
+        f = PK_FIELD.match(line)
+        if f:
+            return f.group(1) + f.group(2) + " = " + region(f.group(3))
+        return UUID.sub(map_uuid, line)
+
     handlers = {"dumpbtm-nosudo.txt": btm_line, "launchctl-gui.txt": launchctl_line,
-                "launchctl-system.txt": launchctl_line, "disabled-gui.txt": disabled_line}
+                "launchctl-system.txt": launchctl_line, "disabled-gui.txt": disabled_line,
+                "pluginkit.txt": pluginkit_line}
     for f, t in texts.items():
         h = handlers[f]
         (ROOT / f).write_text("\n".join(h(line) for line in t.split("\n")))

@@ -12,10 +12,13 @@ public struct ItemCorrelator {
         public var btm: [BTMRecord]
         public var disabled: [String: Bool]
         public var uid: Int
+        /// V0.5.4: app extensions from `pluginkit -mAvv`.
+        public var extensions: [AppExtensionRecord]
         public init(jobs: [LaunchJobRecord], launchd: [LaunchdServiceRecord],
-                    btm: [BTMRecord], disabled: [String: Bool], uid: Int) {
+                    btm: [BTMRecord], disabled: [String: Bool], uid: Int,
+                    extensions: [AppExtensionRecord] = []) {
             self.jobs = jobs; self.launchd = launchd; self.btm = btm
-            self.disabled = disabled; self.uid = uid
+            self.disabled = disabled; self.uid = uid; self.extensions = extensions
         }
     }
 
@@ -135,6 +138,11 @@ public struct ItemCorrelator {
                         let probe = (rec.url?.hasPrefix("/") == true) ? appPath
                             : (fileManager.fileExists(atPath: appPath) ? candidate : nil)
                         if let probe { item.appPresent = fileManager.fileExists(atPath: probe) }
+                        // Absolute location of the record's own bundle — what
+                        // pluginkit reports as Path, so the two can merge.
+                        if let url = rec.url {
+                            item.metadata["btm-bundle-path"] = url.hasPrefix("/") ? url : candidate
+                        }
                     }
                 }
             }
@@ -206,6 +214,62 @@ public struct ItemCorrelator {
                 uncorrelated.append(rec.identifier.isEmpty ? (rec.url ?? rec.name) : rec.identifier)
             }
             accum[standaloneKey] = item
+        }
+
+        // ---- Pass 4: app extensions (pluginkit). BTM already lists some of
+        // them (QuickLook, Spotlight, dock tiles): those merge by their
+        // bundle path, or by the bundle's file name when BTM only had the
+        // relative URL. The rest become their own items. `-A` lists every
+        // version of an identifier — one item, versions in metadata.
+        var byBundlePath: [String: String] = [:]
+        var byBundleName: [String: String] = [:]
+        for (key, item) in accum where item.btmPresent && !item.plistPresent && !item.launchdPresent {
+            if let path = item.metadata["btm-bundle-path"] {
+                byBundlePath[PathUtils.canonicalize(path, fileManager: fileManager)] = key
+            }
+            if let path = item.path {
+                byBundleName[(path as NSString).lastPathComponent] = key
+            }
+        }
+        var extensionKeys: [String: String] = [:]
+        for ext in input.extensions {
+            if let key = extensionKeys[ext.identifier] {
+                let versions = accum[key]?.metadata["ext-versions"] ?? ""
+                accum[key]?.metadata["ext-versions"] = versions.isEmpty ? ext.version : versions + ", " + ext.version
+                continue
+            }
+            var key: String?
+            if let path = ext.path {
+                key = byBundlePath[PathUtils.canonicalize(path, fileManager: fileManager)]
+                    ?? byBundleName[(path as NSString).lastPathComponent]
+            }
+            var item: BackgroundItem
+            if let key, let existing = accum[key] {
+                item = existing
+            } else {
+                key = "ext:" + ext.identifier
+                item = BackgroundItem(key: key!, displayName: ext.identifier, type: .appExtension,
+                                      path: ext.path, owner: "user", uid: input.uid, domain: .user,
+                                      category: .appExtensions)
+            }
+            item.type = .appExtension
+            item.category = .appExtensions
+            if let path = ext.path, !(item.path?.hasPrefix("/") ?? false) { item.path = path }
+            item.metadata["ext-election"] = ext.election.rawValue
+            item.metadata["ext-version"] = ext.version
+            if let sdk = ext.sdk { item.metadata["ext-sdk"] = sdk }
+            if let name = ext.displayName { item.metadata["ext-display-name"] = name }
+            if let parent = ext.parentBundle { item.metadata["ext-parent-bundle"] = parent }
+            if let parentName = ext.parentName, item.parentApplication == nil { item.parentApplication = parentName }
+            if item.bundleIdentifier == nil { item.bundleIdentifier = ext.identifier }
+            if !ext.enabled { item.enabled = false }
+            markDomain(&item, true)
+            item.sources.append(SourceEvidence(
+                kind: .pluginkit,
+                detail: "pluginkit: \(ext.identifier) [\(ext.election.rawValue)]" + (ext.sdk.map { " \($0)" } ?? ""),
+                confidence: .high))
+            accum[key!] = item
+            extensionKeys[ext.identifier] = key!
         }
 
         // ---- Finalize: domain derivation + deterministic ids.
