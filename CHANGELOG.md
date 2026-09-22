@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [Unreleased]
+
+### Added
+- Homebrew tap `tietjen/homebrew-tap` (`brew install tietjen/tap/launchkeeper`).
+
+### Fixed
+- `scripts/release.sh` fails unless Apple's notarization status is
+  `Accepted` — `notarytool submit --wait` exits 0 even for `Invalid`.
+
 ## [0.5.0] — 2026-09-22
 
 ### Changed

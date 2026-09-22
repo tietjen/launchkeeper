@@ -81,16 +81,26 @@ codesign --verify --strict --verbose=2 "$DIST/$PKG/launchkeeper"
 
 if [[ $NOTARIZE -eq 1 ]]; then
     ditto -c -k --keepParent "$DIST/$PKG/launchkeeper" "$DIST/launchkeeper-notarize.zip"
+    NOTARY_LOG="$DIST/notarytool.log"
     if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
         # CI: credentials from the environment (GitHub secrets), no keychain profile.
         echo "==> Notarize (Apple ID from environment)"
         xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --wait \
-            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            | tee "$NOTARY_LOG"
     else
         echo "==> Notarize (keychain profile $NOTARY_PROFILE)"
-        xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+        xcrun notarytool submit "$DIST/launchkeeper-notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait \
+            | tee "$NOTARY_LOG"
     fi
     rm -f "$DIST/launchkeeper-notarize.zip"
+    # `notarytool submit --wait` exits 0 even when Apple answers "Invalid" —
+    # the status line is the verdict, not the exit code (same rule as everywhere
+    # else in this tool: exit codes prove nothing).
+    if ! grep -q '^  status: Accepted' "$NOTARY_LOG"; then
+        echo "notarization NOT accepted — see $NOTARY_LOG (xcrun notarytool log <id>)" >&2
+        exit 1
+    fi
     NOTARIZED="notarized"
 else
     NOTARIZED="NOT notarized (curl download or xattr -d com.apple.quarantine needed on other Macs)"

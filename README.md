@@ -79,11 +79,15 @@ from the tag and published at
 <https://github.com/tietjen/launchkeeper/releases>. (Releases up to v0.4.5
 were published under the former name btmctl on the author's Gitea.)
 
-### Homebrew (coming with v0.5.0)
+### Homebrew
 
 ```
+brew trust tietjen/tap          # Homebrew 7+: third-party taps must be trusted once
 brew install tietjen/tap/launchkeeper
 ```
+
+The formula installs the prebuilt universal binary from the GitHub release,
+pinned by its SHA-256; `brew upgrade launchkeeper` follows new releases.
 
 ### Option A — prebuilt release (no Xcode needed)
 
