@@ -285,13 +285,40 @@ final class BackgroundViewTests: XCTestCase {
         XCTAssertFalse(try! JSONRenderer.encode(view).isEmpty)
     }
 
-    func testUnnamedContainerIsNamedAfterItsComponentExecutable() {
-        // Live: the pane shows "bash" for a developer row without a name.
-        let containers = [BTMContainer(identifier: "32.T.unnamed", name: "32.T.unnamed", kind: .developer)]
-        let items = [item("guard", parent: "32.T.unnamed", identifier: "16.de.example.guard", btm: true,
-                          executable: "/bin/bash")]
+    func testUnnamedRegistrationsBecomeOneRowPerComponentNamedAfterTheExecutable() {
+        // Live: three "(null)" developer records share the identifier
+        // "Unknown Developer"; the pane shows "bash" (exec icon) per component.
+        let containers = [BTMContainer(identifier: "Unknown Developer", name: "Unknown Developer", kind: .developer,
+                                       unnamed: true)]
+        let items = [item("guard", parent: "Unknown Developer", identifier: "16.de.example.guard", btm: true,
+                          executable: "/bin/bash"),
+                     item("gateway", parent: "Unknown Developer", identifier: "16.ai.example.gateway", btm: false,
+                          executable: "/usr/bin/python3")]
         let view = BackgroundView.build(from: report(items: items, containers: containers))
-        XCTAssertEqual(view.background[0].name, "bash")
+        XCTAssertEqual(view.background.map(\.name), ["bash", "python3"])
+        XCTAssertEqual(view.background.map(\.toggle), [.on, .off])
+        XCTAssertEqual(view.background.map { $0.components.count }, [1, 1])
+    }
+
+    func testNamedDeveloperRowKeepsItsNameEvenWhenItEqualsTheIdentifier() {
+        // Regression (v0.5.2): developer records carry their name as their
+        // identifier ("Docker" / "Docker") and were renamed after a component.
+        let containers = [BTMContainer(identifier: "Docker", name: "Docker", kind: .developer)]
+        let items = [item("com.docker.vmnetd", parent: "Docker", identifier: "16.com.docker.vmnetd", btm: true,
+                          executable: "/Library/PrivilegedHelperTools/com.docker.vmnetd")]
+        let view = BackgroundView.build(from: report(items: items, containers: containers))
+        XCTAssertEqual(view.background[0].name, "Docker")
+    }
+
+    func testIndexMarksNullNamedRecordsAsUnnamed() {
+        let records = [
+            btm(["Name": "(null)", "Developer Name": "(null)", "Type": "developer (0x20)", "Identifier": "Unknown Developer"]),
+            btm(["Name": "Docker", "Developer Name": "Docker", "Type": "developer (0x20)", "Identifier": "Docker"]),
+            btm(["Name": "(null)", "Developer Name": "Vendor, Inc.", "Type": "developer (0x20)", "Identifier": "32.T.v"]),
+        ]
+        let containers = BTMContainerIndex.build(from: records)
+        XCTAssertEqual(containers.map(\.unnamed), [true, false, false])
+        XCTAssertEqual(containers.map(\.name), ["Unknown Developer", "Docker", "Vendor, Inc."])
     }
 
     func testEmbeddedListAlsoAttachesComponents() {

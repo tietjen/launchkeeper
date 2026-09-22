@@ -98,6 +98,19 @@ public struct BackgroundView: Codable {
                 }
             }
             members.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+            // Unnamed registrations ("Unknown Developer"): the pane shows one row
+            // per component, named after the component's executable ("bash").
+            if container.unnamed, !members.isEmpty {
+                for member in members {
+                    let name = member.executable.map { ($0 as NSString).lastPathComponent } ?? member.displayName
+                    rows.append(Row(name: name, kind: container.kind, identifier: container.identifier,
+                                    teamIdentifier: container.teamIdentifier,
+                                    toggle: btmEnabled(member) ? .on : .off,
+                                    rawDisposition: container.dispositionTokens,
+                                    components: [component(member)]))
+                }
+                continue
+            }
             let ownBit = container.dispositionTokens.contains("enabled")
             let toggle: Toggle
             if members.isEmpty {
@@ -105,18 +118,12 @@ public struct BackgroundView: Codable {
             } else if members.allSatisfy(btmEnabled) { toggle = .on }
             else if members.allSatisfy({ !btmEnabled($0) }) { toggle = .off }
             else { toggle = .mixed }
-            // The pane names an unnamed row after its component's executable ("bash").
-            var name = container.name
-            if name.isEmpty || name == "(null)" || name == container.identifier {
-                name = members.first.flatMap { $0.executable.map { ($0 as NSString).lastPathComponent } }
-                    ?? members.first?.displayName ?? container.identifier
-            }
-            rows.append(Row(name: name, kind: container.kind, identifier: container.identifier,
+            rows.append(Row(name: container.name, kind: container.kind, identifier: container.identifier,
                             teamIdentifier: container.teamIdentifier, toggle: toggle,
                             rawDisposition: container.dispositionTokens,
                             components: members.map(component)))
             if container.kind == .app, ownBit {
-                login.append(LoginItem(name: name, identifier: container.identifier,
+                login.append(LoginItem(name: container.name, identifier: container.identifier,
                                        bundlePath: container.bundlePath))
             }
         }

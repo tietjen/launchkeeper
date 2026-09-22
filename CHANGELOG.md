@@ -5,7 +5,15 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.2
+## [Unreleased] — 0.5.3
+
+### Fixed
+- `background`: developer rows carry their name as their identifier
+  ("Docker" / "Docker") and were renamed after a component in 0.5.2; names
+  are kept. Unnamed registrations ("Unknown Developer") appear one row per
+  component, named after the component's executable — as the pane does.
+
+## [0.5.2] — 2026-09-22
 
 ### Fixed
 - `background` now matches the System Settings pane (verified against it):

@@ -122,13 +122,20 @@ public struct BTMContainer: Codable, Equatable {
     /// point back via their own `Parent Identifier`.
     public var embedded: [String]
     public var uids: [Int]
+    /// `Name` and `Developer Name` are both `(null)` (identifier "Unknown
+    /// Developer"): the pane shows such registrations one row per component,
+    /// named after the component's executable. Developer records otherwise
+    /// carry their name AS their identifier ("Docker" / "Docker") — never
+    /// treat name == identifier as "unnamed".
+    public var unnamed: Bool
 
     public init(identifier: String, name: String, kind: Kind, teamIdentifier: String? = nil,
                 bundlePath: String? = nil, dispositionTokens: [String] = [],
-                embedded: [String] = [], uids: [Int] = []) {
+                embedded: [String] = [], uids: [Int] = [], unnamed: Bool = false) {
         self.identifier = identifier; self.name = name; self.kind = kind
         self.teamIdentifier = teamIdentifier; self.bundlePath = bundlePath
         self.dispositionTokens = dispositionTokens; self.embedded = embedded; self.uids = uids
+        self.unnamed = unnamed
     }
 }
 
@@ -144,7 +151,9 @@ public enum BTMContainerIndex {
             default: continue
             }
             let id = rec.identifier.isEmpty ? "uid\(rec.sectionUID):" + rec.name : rec.identifier
-            let name = (rec.name.isEmpty || rec.name == "(null)") ? (rec.developerName ?? rec.identifier) : rec.name
+            let nameless = rec.name.isEmpty || rec.name == "(null)"
+            let unnamed = nameless && rec.developerName == nil
+            let name = nameless ? (rec.developerName ?? rec.identifier) : rec.name
             if var existing = byID[id] {
                 if !existing.uids.contains(rec.sectionUID) { existing.uids.append(rec.sectionUID) }
                 for child in rec.trailingBlock where !existing.embedded.contains(child) {
@@ -158,7 +167,8 @@ public enum BTMContainerIndex {
                                         teamIdentifier: rec.teamIdentifier,
                                         bundlePath: (rec.url?.hasPrefix("/") == true) ? rec.url : nil,
                                         dispositionTokens: rec.dispositionTokens,
-                                        embedded: rec.trailingBlock, uids: [rec.sectionUID])
+                                        embedded: rec.trailingBlock, uids: [rec.sectionUID],
+                                        unnamed: unnamed)
                 order.append(id)
             }
         }
