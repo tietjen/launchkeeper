@@ -73,12 +73,17 @@ Remediation rules, enforced in code (not docs):
 
 ## Installation (macOS 14+)
 
-launchkeeper is one universal CLI binary (Apple silicon + Intel), signed with a
-Developer ID and notarized by Apple. Test releases are published on Gitea:
-<https://git.dev.paranoidsecurity.de/tj/launchkeeper/releases>
-(the source repository stays private while the tool is in multi-device
-testing; the **Releases** unit is set to anonymous read, so the assets
-download without a login or token).
+launchkeeper is one universal CLI binary (Apple silicon + Intel), signed with
+a Developer ID and notarized by Apple. Releases are built by GitHub Actions
+from the tag and published at
+<https://github.com/tietjen/launchkeeper/releases>. (Releases up to v0.4.5
+were published under the former name btmctl on the author's Gitea.)
+
+### Homebrew (coming with v0.5.0)
+
+```
+brew install tietjen/tap/launchkeeper
+```
 
 ### Option A — prebuilt release (no Xcode needed)
 
@@ -86,7 +91,7 @@ download without a login or token).
    from the release page. Prefer `curl` over the browser: files fetched by
    curl carry no quarantine flag, so Gatekeeper never gets involved.
    ```
-   BASE=https://git.dev.paranoidsecurity.de/tj/launchkeeper/releases/download/v0.5.0
+   BASE=https://github.com/tietjen/launchkeeper/releases/download/v0.5.0
    curl -fsSLO "$BASE/launchkeeper-v0.5.0-macos-universal.tar.gz"
    curl -fsSLO "$BASE/SHA256SUMS"
    ```
@@ -126,13 +131,18 @@ those only if you no longer need the undo history.
 ### Option B — build from source (Xcode 16+ / Swift 6)
 
 ```
-git clone ssh://git@git.dev.paranoidsecurity.de:2222/tj/launchkeeper.git
+git clone https://github.com/tietjen/launchkeeper.git
 cd launchkeeper
 swift build -c release
 sudo install -m 755 .build/release/launchkeeper /usr/local/bin/launchkeeper
 ```
 
 ### Cutting a release (maintainer)
+
+Push a tag `v<version>` — `.github/workflows/release.yml` runs the tests,
+builds the universal binary, signs and notarizes it with the repository
+secrets and publishes the GitHub release with `SHA256SUMS`. `ci.yml` builds
+and tests every push. The same steps run locally:
 
 ```
 scripts/release.sh 0.5.0                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS

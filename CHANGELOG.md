@@ -16,7 +16,13 @@ under the former name **btmctl**.
   `LAUNCHKEEPER_BTM_TIMEOUT`.
 - Licensed under MIT; added SECURITY.md and CONTRIBUTING.md.
 - Test fixtures are now synthetic (anonymized captures); real captures never
-  leave the developer's machine.
+  leave the developer's machine. The git history was rewritten on 2026-09-22
+  to carry the anonymized fixtures and neutral example names in every
+  commit; tags v0.4.1–v0.4.5 point at the rewritten commits (the published
+  release assets are unchanged).
+- Public home on GitHub (`tietjen/launchkeeper`); GitHub Actions build and
+  test every push (`ci.yml`) and turn a `v*` tag into a signed, notarized
+  release (`release.yml`).
 
 ## [0.4.5] — 2026-09-22
 ### Fixed
