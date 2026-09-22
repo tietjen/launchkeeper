@@ -550,7 +550,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.5.5).
+        Background-service inventory + app correlation + gated remediation (V0.5.6).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -559,7 +559,7 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.5.5",
+        version: "0.5.6",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,

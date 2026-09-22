@@ -13,10 +13,13 @@ public struct LaunchJobRecord: Equatable {
     public var ownerName: String
     public var malformed: Bool          // unreadable / not a plist / no usable keys
     public var parsedKeys: [String]     // unknown plist keys preserved
+    /// V0.5.6: StartInterval / StartCalendarInterval rendered for humans.
+    public var schedule: String?
 
     public init(label: String, path: String, domain: ItemDomain, kind: ItemType,
                 program: String?, arguments: [String], runAtLoad: Bool, keepAlive: Bool,
-                ownerName: String, malformed: Bool, parsedKeys: [String] = []) {
+                ownerName: String, malformed: Bool, parsedKeys: [String] = [], schedule: String? = nil) {
+        self.schedule = schedule
         self.label = label
         self.path = path
         self.domain = domain

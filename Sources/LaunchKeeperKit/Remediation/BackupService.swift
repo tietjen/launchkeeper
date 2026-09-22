@@ -28,7 +28,7 @@ public struct BackupEnvironment {
                 backupsRoot: String? = nil, legacyBackupsRoots: [String]? = nil,
                 runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default, home: String = NSHomeDirectory(),
-                uid: Int = -1, toolVersion: String = "0.5.5") {
+                uid: Int = -1, toolVersion: String = "0.5.6") {
         self.launchDirs = launchDirs ?? [
             home + "/Library/LaunchAgents", home + "/Library/LaunchDaemons",
             "/Library/LaunchAgents", "/Library/LaunchDaemons",

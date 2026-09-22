@@ -5,7 +5,30 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.5
+## [Unreleased] — 0.5.6
+
+### Added
+- Scheduled: launchd `StartInterval` / `StartCalendarInterval` are rendered
+  as `schedule` metadata on launch items and `list --category scheduled`
+  includes them. The user's crontab, `/etc/crontab`, `atq`, `periodic(8)`
+  scripts and `pmset -g sched` power events become items of category
+  `scheduled`; a cron command with an absolute path is the item's
+  executable, so a missing one is an orphan. Apple's own power alarms hide
+  in the default view. A failed `crontab`, `atq` or `pmset` call marks the
+  inventory incomplete.
+- Legacy: `LoginHook`/`LogoutHook` from the loginwindow preferences,
+  `/Library/StartupItems` (each entry flagged as a leftover — SystemStarter
+  is gone since OS X 10.10), `/etc/rc.local`, `/etc/rc.shutdown.local`,
+  `/etc/launchd.conf` and non-Apple emond rules as category `legacy`.
+- Plugin directories: authorization plugins (checked against the
+  `system.login.console` mechanism chain), HAL audio drivers, Spotlight
+  importers, QuickLook generators, input methods, Internet plug-ins, screen
+  savers, preference panes, scripting additions and color pickers, system
+  and per-user, as category `plugin-directories` with bundle id, version
+  and code signature. All three categories are display-only; the control
+  text names the manual route. Two fixtures, 15 tests.
+
+## [0.5.5] — 2026-09-22
 
 ### Added
 - System extensions: `systemextensionsctl list` is a scan source. Network,

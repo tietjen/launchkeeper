@@ -37,6 +37,33 @@ public struct ControlAnalyzer {
             return Controllability(level: .displayOnly, actions: [],
                 reason: "privileged helper without a launchd job — nothing to disable; deleting helper "
                     + "binaries comes with V0.8 cleanup")
+        // V0.5.6 scheduled / legacy / plugin directories: read-only for now.
+        case .cronJob:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "cron entry — commenting it out with a backup comes with V0.7; until then `crontab -e`")
+        case .atJob:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "at job — `atrm <job>` removes it; launchkeeper control comes with V0.7")
+        case .powerEvent:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "scheduled power event — `sudo pmset schedcancel` / the owning app; read-only here")
+        case .periodicScript:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "periodic(8) script — removal over the gate comes with V0.8 cleanup")
+        case .loginHook:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "loginwindow hook — `sudo defaults delete \(item.path ?? "com.apple.loginwindow") "
+                    + "\(item.metadata["hook-kind"] ?? "LoginHook")` removes it; gate support comes with V0.8")
+        case .startupItem:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "legacy StartupItem — nothing runs it since OS X 10.10; removal over the gate comes with V0.8")
+        case .rcScript, .emondRule:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "legacy persistence file — review by hand; removal over the gate comes with V0.8")
+        case .plugin:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "plugin bundle (\(item.metadata["plugin-kind"] ?? "plugin")) — loaded by location; "
+                    + "removal over the gate comes with V0.8")
         default:
             break
         }

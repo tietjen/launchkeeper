@@ -46,7 +46,8 @@ public struct LaunchJobScanner {
                         program: job.program, arguments: job.arguments,
                         runAtLoad: job.runAtLoad, keepAlive: job.keepAlive,
                         ownerName: owner, malformed: job.program == nil,
-                        parsedKeys: job.unknownKeys
+                        parsedKeys: job.unknownKeys,
+                        schedule: PlistReader.extractSchedule(dict: dict)
                     ))
                 } catch {
                     warnings.append("malformed plist: \(fullPath)")

@@ -28,7 +28,7 @@ import json, pathlib, re, random, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Tests" / "Fixtures"
 REAL = ROOT / "real"
 FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt", "pluginkit.txt",
-         "systemextensionsctl.txt"]
+         "systemextensionsctl.txt", "pmset-sched.txt", "authorizationdb-login.txt"]
 
 # Anchors the tests reference by name get fixed, readable pseudonyms. The
 # mapping itself names real identifiers, so it lives next to the real
@@ -185,9 +185,14 @@ def main(report=False):
             cols[4] = region(cols[4])
         return "\t".join(cols)
 
+    def keep_line(line):
+        # pmset / authorizationdb output names only Apple components; kept verbatim.
+        return line
+
     handlers = {"dumpbtm-nosudo.txt": btm_line, "launchctl-gui.txt": launchctl_line,
                 "launchctl-system.txt": launchctl_line, "disabled-gui.txt": disabled_line,
-                "pluginkit.txt": pluginkit_line, "systemextensionsctl.txt": sysext_line}
+                "pluginkit.txt": pluginkit_line, "systemextensionsctl.txt": sysext_line,
+                "pmset-sched.txt": keep_line, "authorizationdb-login.txt": keep_line}
     for f, t in texts.items():
         h = handlers[f]
         (ROOT / f).write_text("\n".join(h(line) for line in t.split("\n")))

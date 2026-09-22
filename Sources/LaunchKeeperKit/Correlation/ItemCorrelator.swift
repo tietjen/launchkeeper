@@ -18,14 +18,21 @@ public struct ItemCorrelator {
         public var systemExtensions: [SystemExtensionRecord]
         public var kexts: [KernelExtensionRecord]
         public var helpers: [PrivilegedHelperRecord]
+        /// V0.5.6: scheduled, legacy persistence, plugin directories.
+        public var scheduled: ScheduledScanner.Result
+        public var legacy: LegacyScanner.Result
+        public var plugins: [PluginBundleRecord]
         public init(jobs: [LaunchJobRecord], launchd: [LaunchdServiceRecord],
                     btm: [BTMRecord], disabled: [String: Bool], uid: Int,
                     extensions: [AppExtensionRecord] = [],
                     systemExtensions: [SystemExtensionRecord] = [], kexts: [KernelExtensionRecord] = [],
-                    helpers: [PrivilegedHelperRecord] = []) {
+                    helpers: [PrivilegedHelperRecord] = [],
+                    scheduled: ScheduledScanner.Result = .init(), legacy: LegacyScanner.Result = .init(),
+                    plugins: [PluginBundleRecord] = []) {
             self.jobs = jobs; self.launchd = launchd; self.btm = btm
             self.disabled = disabled; self.uid = uid; self.extensions = extensions
             self.systemExtensions = systemExtensions; self.kexts = kexts; self.helpers = helpers
+            self.scheduled = scheduled; self.legacy = legacy; self.plugins = plugins
         }
     }
 
@@ -57,6 +64,7 @@ public struct ItemCorrelator {
             item.sources.append(SourceEvidence(kind: .plist, detail: job.path, confidence: .high))
             if job.runAtLoad { item.metadata["runAtLoad"] = "true" }
             if job.keepAlive { item.metadata["keepAlive"] = "true" }
+            if let schedule = job.schedule { item.metadata["schedule"] = schedule }
             // An override exists independently of a loaded job: an unloaded
             // agent with `print-disabled` = disabled is disabled (V0.4.3 —
             // without this, `remove` did not know to drop the stale override).
@@ -373,6 +381,124 @@ public struct ItemCorrelator {
                 detail: "helper: \(helper.path)"
                     + (helper.authorizedClients.isEmpty ? "" : " clients: " + helper.authorizedClients.joined(separator: ", ")),
                 confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 7: scheduled work outside launchd — cron, at, pmset,
+        // periodic. Each is its own item; a cron command with an absolute
+        // path is the executable (so "executable missing" applies).
+        func firstExecutable(_ command: String) -> String? {
+            guard let token = command.split(separator: " ").first.map(String.init) else { return nil }
+            return token.hasPrefix("/") ? token : nil
+        }
+        for entry in input.scheduled.cron {
+            let key = "cron:\(entry.user):\(entry.source):\(entry.line)"
+            let isUser = entry.source == "crontab"
+            var item = BackgroundItem(key: key, displayName: entry.command.count > 72
+                                        ? String(entry.command.prefix(69)) + "..." : entry.command,
+                                      type: .cronJob, path: isUser ? nil : entry.source,
+                                      executable: firstExecutable(entry.command),
+                                      owner: entry.user, uid: isUser ? input.uid : 0,
+                                      domain: isUser ? .user : .system, enabled: true, category: .scheduled)
+            item.metadata["schedule"] = "cron " + entry.schedule
+            item.metadata["cron-source"] = isUser ? "crontab -l (\(entry.user))" : entry.source
+            item.metadata["cron-line"] = String(entry.line)
+            item.metadata["cron-command"] = entry.command
+            markDomain(&item, isUser)
+            item.sources.append(SourceEvidence(kind: .cron,
+                detail: "\(item.metadata["cron-source"]!) line \(entry.line): \(entry.schedule)", confidence: .high))
+            accum[key] = item
+        }
+        for job in input.scheduled.atJobs {
+            let key = "at:" + job.id
+            var item = BackgroundItem(key: key, displayName: "at job \(job.id) (\(job.when))", type: .atJob,
+                                      owner: job.owner, uid: input.uid, domain: .user, enabled: true,
+                                      category: .scheduled)
+            item.metadata["schedule"] = "at " + job.when
+            item.metadata["at-queue"] = job.queue
+            markDomain(&item, true)
+            item.sources.append(SourceEvidence(kind: .at, detail: "atq: job \(job.id) queue \(job.queue) at \(job.when)",
+                                               confidence: .high))
+            accum[key] = item
+        }
+        for event in input.scheduled.powerEvents {
+            let key = "pmset:\(event.index):\(event.owner)"
+            var item = BackgroundItem(key: key, displayName: event.owner, type: .powerEvent,
+                                      owner: "root", uid: 0, domain: .system, enabled: true, category: .scheduled)
+            item.metadata["schedule"] = "\(event.kind) at \(event.when)"
+            item.metadata["power-kind"] = event.kind
+            item.metadata["power-visible"] = event.userVisible ? "true" : "false"
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(kind: .pmset, detail: "pmset -g sched: \(event.kind) at \(event.when)",
+                                               confidence: .high))
+            accum[key] = item
+        }
+        for script in input.scheduled.periodic {
+            let key = "periodic:\(script.period):\(script.name)"
+            var item = BackgroundItem(key: key, displayName: script.name, type: .periodicScript,
+                                      path: script.path, executable: script.path, owner: "root", uid: 0,
+                                      domain: .system, enabled: true, category: .scheduled)
+            item.metadata["schedule"] = "periodic " + script.period
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(kind: .periodic, detail: "periodic \(script.period): \(script.path)",
+                                               confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 8: legacy persistence. loginwindow hooks, StartupItems,
+        // rc.local & friends, emond rules.
+        for hook in input.legacy.hooks {
+            let isUser = hook.domain == .user
+            let key = "hook:\(hook.kind):\(isUser ? "user" : "system")"
+            var item = BackgroundItem(key: key, displayName: "\(hook.kind) → \(hook.script)", type: .loginHook,
+                                      path: hook.source, executable: hook.script,
+                                      owner: isUser ? "user" : "root", uid: isUser ? input.uid : 0,
+                                      domain: hook.domain, enabled: true, category: .legacy)
+            item.metadata["hook-kind"] = hook.kind
+            markDomain(&item, isUser)
+            item.sources.append(SourceEvidence(kind: .legacy, detail: "\(hook.kind) in \(hook.source)", confidence: .high))
+            accum[key] = item
+        }
+        for startup in input.legacy.startupItems {
+            let key = "startupitem:" + startup.name
+            var item = BackgroundItem(key: key, displayName: startup.name, type: .startupItem,
+                                      path: startup.directory, executable: startup.script, owner: "root", uid: 0,
+                                      domain: .system, enabled: true, category: .legacy)
+            if let description = startup.description { item.metadata["startup-description"] = description }
+            if !startup.provides.isEmpty { item.metadata["startup-provides"] = startup.provides.joined(separator: ", ") }
+            if !startup.hasParameters { item.metadata["startup-parameters"] = "missing" }
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(kind: .legacy, detail: "StartupItem: \(startup.directory)", confidence: .high))
+            accum[key] = item
+        }
+        for file in input.legacy.files {
+            let key = "legacy:\(file.kind):\(file.path)"
+            let type: ItemType = file.kind == "emond-rule" ? .emondRule : .rcScript
+            var item = BackgroundItem(key: key, displayName: (file.path as NSString).lastPathComponent, type: type,
+                                      path: file.path, executable: type == .rcScript ? file.path : nil,
+                                      owner: "root", uid: 0, domain: .system, enabled: true, category: .legacy)
+            item.metadata["legacy-kind"] = file.kind
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(kind: .legacy, detail: "\(file.kind): \(file.path)", confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 9: plugin directories. One item per bundle.
+        for plugin in input.plugins {
+            let key = "plugin:\(plugin.kind):\(plugin.name)"
+            let isUser = plugin.domain == .user
+            var item = BackgroundItem(key: key, displayName: plugin.name, type: .plugin, path: plugin.path,
+                                      owner: isUser ? "user" : "root", uid: isUser ? input.uid : 0,
+                                      domain: plugin.domain, bundleIdentifier: plugin.bundleIdentifier,
+                                      loaded: plugin.wiredIntoLogin ?? false, enabled: true,
+                                      category: .pluginDirectories)
+            item.metadata["plugin-kind"] = plugin.kind
+            if let version = plugin.version { item.metadata["plugin-version"] = version }
+            if let wired = plugin.wiredIntoLogin {
+                item.metadata["auth-login-mechanism"] = wired ? "referenced by system.login.console" : "not referenced by system.login.console"
+            }
+            markDomain(&item, isUser)
+            item.sources.append(SourceEvidence(kind: .plugin, detail: "\(plugin.kind): \(plugin.path)", confidence: .high))
             accum[key] = item
         }
 

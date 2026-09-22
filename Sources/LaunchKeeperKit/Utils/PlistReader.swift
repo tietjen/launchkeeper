@@ -42,4 +42,27 @@ public enum PlistReader {
                 dict["KeepAlive"] != nil,
                 unknown)
     }
+
+    /// V0.5.6: the launchd timer keys, rendered. `StartInterval` is seconds;
+    /// `StartCalendarInterval` a dict or an array of dicts of calendar fields.
+    public static func extractSchedule(dict: [String: Any]) -> String? {
+        var parts: [String] = []
+        if let seconds = dict["StartInterval"] as? Int, seconds > 0 {
+            parts.append("every \(seconds) s")
+        }
+        let order = ["Minute", "Hour", "Day", "Weekday", "Month"]
+        func render(_ cal: [String: Any]) -> String {
+            let fields = order.compactMap { key -> String? in
+                guard let value = cal[key] else { return nil }
+                return "\(key)=\(value)"
+            }
+            return fields.isEmpty ? "calendar (every minute)" : "calendar " + fields.joined(separator: " ")
+        }
+        if let cal = dict["StartCalendarInterval"] as? [String: Any] {
+            parts.append(render(cal))
+        } else if let cals = dict["StartCalendarInterval"] as? [[String: Any]] {
+            parts.append(contentsOf: cals.map(render))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
+    }
 }

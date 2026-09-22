@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.5)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.6)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -185,6 +185,11 @@ launchkeeper list --category system-extensions  # systemextensionsctl + kexts: n
                                      # camera extensions, legacy kernel extensions — state and host app
 launchkeeper list --category privileged-helpers # /Library/PrivilegedHelperTools: SMJobBless helpers with
                                      # their LaunchDaemon and authorized client apps; leftovers flagged
+launchkeeper list --category scheduled          # everything on a timer: launchd StartInterval/StartCalendarInterval,
+                                     # cron, at, periodic(8), pmset power events (Apple's alarms with --all)
+launchkeeper list --category legacy             # loginwindow hooks, /Library/StartupItems, rc.local, emond rules
+launchkeeper list --category plugin-directories # authorization plugins (with their login wiring), HAL audio,
+                                     # Spotlight, QuickLook, input methods, screen savers, prefpanes, …
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -292,7 +297,8 @@ Every item carries three more dimensions, visible in `inspect` and `--json`:
 
 - **category** — the Autoruns-style tab it belongs to (`launch-items`,
   `login-items`, `app-extensions`, `system-extensions`,
-  `privileged-helpers`; more scanners follow in V0.5.x).
+  `privileged-helpers`, `scheduled`, `legacy`, `plugin-directories`;
+  shell startup and network follow in V0.5.x).
   `list --category <name>` filters by it.
 - **control** — what launchkeeper can do with it, computed from the *same*
   gate the mutating commands consult: `reversible` (disable/enable),
@@ -370,6 +376,35 @@ and clients are often nested bundles — so the client is named for display
 and nothing more. Helpers without an embedded Info.plist (some vendors skip
 it) are listed with the fact.
 
+## Scheduled, legacy, plugin directories (V0.5.6)
+
+**Scheduled** is everything that runs on a timer. launchd jobs with
+`StartInterval` or `StartCalendarInterval` stay launch items but carry a
+`schedule` in their metadata, and `list --category scheduled` includes
+them. The rest are their own items: the user's crontab (`crontab -l`) and
+`/etc/crontab` if present, `atq` jobs, `periodic(8)` scripts under
+`/etc/periodic` and `/usr/local/etc/periodic`, and `pmset -g sched` power
+events (Apple's own alarms hide like other Apple internals; `--all` shows
+them). A cron command with an absolute path is the item's executable, so a
+missing one is an orphan like a missing launchd program. All of it is
+read-only for now; the control text names the manual route.
+
+**Legacy** covers persistence mechanisms macOS no longer runs or that are
+unusual enough to deserve a look: `LoginHook`/`LogoutHook` in the
+loginwindow preferences, `/Library/StartupItems` (SystemStarter left with
+OS X 10.10 — every entry there is a leftover and flagged as such),
+`/etc/rc.local`, `/etc/rc.shutdown.local`, `/etc/launchd.conf` and
+non-Apple emond rules.
+
+**Plugin directories** lists the bundles the OS loads by location:
+authorization plugins (`/Library/Security/SecurityAgentPlugins`, checked
+against the `system.login.console` mechanism chain from `security
+authorizationdb read` — a plugin wired into login shows as loaded), HAL
+audio drivers, Spotlight importers, QuickLook generators, input methods,
+Internet plug-ins, screen savers, preference panes, scripting additions and
+color pickers, system-wide and per user, each with bundle id, version and
+code signature. Display-only until V0.8 cleanup.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -379,6 +414,9 @@ it) are listed with the fact.
     systemextensionsctl list ──┤
     kmutil + /Library/Extensions┤
     PrivilegedHelperTools    ──┤
+    crontab/atq/pmset/periodic┤
+    loginwindow/StartupItems ──┤
+    plugin directories       ──┤
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
     .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
                                      Spotlight confirmation)
@@ -500,6 +538,12 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.6** ✅ — scheduled work (launchd timers as metadata, cron, at,
+  periodic, pmset), legacy persistence (loginwindow hooks, StartupItems,
+  rc.local, emond) and plugin directories (authorization plugins with their
+  login wiring, HAL, Spotlight, QuickLook, input methods, screen savers,
+  prefpanes, scripting additions) as categories `scheduled` / `legacy` /
+  `plugin-directories`
 - **V0.5.5** ✅ — system extensions (`systemextensionsctl list`), kernel
   extensions (`kmutil showloaded` + `/Library/Extensions`) and privileged
   helper tools (`/Library/PrivilegedHelperTools` + embedded Info.plist) as

@@ -86,6 +86,14 @@ public struct OrphanDetector {
                 raise(.medium)
             }
 
+            // 9. (V0.5.6) StartupItems: SystemStarter left with OS X 10.10.
+            // Whatever sits in /Library/StartupItems never runs — a leftover
+            // of an installer that predates launchd-only boot.
+            if item.type == .startupItem {
+                reasons.append("legacy StartupItem — SystemStarter is gone since OS X 10.10, nothing runs it")
+                raise(.medium)
+            }
+
             // 6. (V0.4.4) BTM leftover: the record is all that is left — no
             // plist on disk, no launchd job. Not a broken component but the
             // trail of one already removed. `remove` has nothing to delete and

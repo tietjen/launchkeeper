@@ -18,9 +18,16 @@ public struct ScanOptions: Sendable {
     public var scanSystemExtensions: Bool
     /// /Library/PrivilegedHelperTools with embedded Info.plists (V0.5.5).
     public var scanHelpers: Bool
+    /// cron, at, pmset power events, periodic scripts (V0.5.6).
+    public var scanScheduled: Bool
+    /// loginwindow hooks, StartupItems, rc.local, emond rules (V0.5.6).
+    public var scanLegacy: Bool
+    /// Plugin directories: authorization, HAL, Spotlight, QuickLook, … (V0.5.6).
+    public var scanPlugins: Bool
     public init(includeUser: Bool = true, includeSystem: Bool = true,
                 scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true,
-                scanSystemExtensions: Bool = true, scanHelpers: Bool = true) {
+                scanSystemExtensions: Bool = true, scanHelpers: Bool = true,
+                scanScheduled: Bool = true, scanLegacy: Bool = true, scanPlugins: Bool = true) {
         self.includeUser = includeUser
         self.includeSystem = includeSystem
         self.scanBTM = scanBTM
@@ -28,6 +35,9 @@ public struct ScanOptions: Sendable {
         self.scanExtensions = scanExtensions
         self.scanSystemExtensions = scanSystemExtensions
         self.scanHelpers = scanHelpers
+        self.scanScheduled = scanScheduled
+        self.scanLegacy = scanLegacy
+        self.scanPlugins = scanPlugins
     }
 }
 
@@ -227,6 +237,37 @@ public struct ScanCoordinator {
         } else {
             checks.append("privileged helpers: skipped")
         }
+
+        // ---- Stage 3e: scheduled (cron, at, pmset, periodic). Contribute items.
+        var scheduled = ScheduledScanner.Result()
+        if options.scanScheduled {
+            scheduled = ScheduledScanner(runner: env.runner, fileManager: env.fileManager).scan()
+            checks.append(contentsOf: scheduled.checks)
+            warnings.append(contentsOf: scheduled.warnings)
+            incomplete.append(contentsOf: scheduled.failed)
+        } else {
+            checks.append("scheduled: skipped")
+        }
+
+        // ---- Stage 3f: legacy persistence. File reads only.
+        var legacy = LegacyScanner.Result()
+        if options.scanLegacy {
+            legacy = LegacyScanner(fileManager: env.fileManager, home: env.home).scan()
+            checks.append(contentsOf: legacy.checks)
+            warnings.append(contentsOf: legacy.warnings)
+        } else {
+            checks.append("legacy: skipped")
+        }
+
+        // ---- Stage 3g: plugin directories.
+        var plugins = PluginDirectoryScanner.Result()
+        if options.scanPlugins {
+            plugins = PluginDirectoryScanner(runner: env.runner, fileManager: env.fileManager, home: env.home).scan()
+            checks.append(contentsOf: plugins.checks)
+            warnings.append(contentsOf: plugins.warnings)
+        } else {
+            checks.append("plugin directories: skipped")
+        }
         if !incomplete.isEmpty {
             warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
                 + "ids are positional per scan and will not match a complete run: address "
@@ -237,7 +278,8 @@ public struct ScanCoordinator {
         let correlator = ItemCorrelator(fileManager: env.fileManager)
         let (items, uncorrelated) = correlator.correlate(ItemCorrelator.Input(
             jobs: jobs, launchd: launchd, btm: btm, disabled: disabled, uid: env.uid,
-            extensions: extensions, systemExtensions: systemExtensions, kexts: kexts, helpers: helpers))
+            extensions: extensions, systemExtensions: systemExtensions, kexts: kexts, helpers: helpers,
+            scheduled: scheduled, legacy: legacy, plugins: plugins.plugins))
 
         // ---- Stage 5: signatures (enrichment).
         var enriched = items
@@ -247,7 +289,8 @@ public struct ScanCoordinator {
                 // Bundles (system extensions, kexts) are signed as a whole:
                 // codesign takes the bundle path.
                 let item = enriched[index]
-                let bundle = (item.type == .systemExtension || item.type == .kernelExtension) ? item.path : nil
+                let bundleTypes: Set<ItemType> = [.systemExtension, .kernelExtension, .plugin]
+                let bundle = bundleTypes.contains(item.type) ? item.path : nil
                 guard let exec = item.executable ?? bundle, !exec.isEmpty else { continue }
                 let record = signatures.status(for: exec, runner: env.runner)
                 enriched[index].codeSignatureStatus = record.status

@@ -261,7 +261,7 @@ final class SystemExtensionStageTests: XCTestCase {
             // systemextensionsctl not scripted → exit 127 → incomplete
         ])
         let options = ScanOptions(includeUser: true, includeSystem: false, scanBTM: false, scanSignatures: false,
-                                  scanExtensions: false, scanSystemExtensions: true, scanHelpers: false)
+                                  scanExtensions: false, scanSystemExtensions: true, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false)
         let report = ScanCoordinator(environment: ScanEnvironment(runner: runner, home: root, uid: 501)).perform(options: options)
         XCTAssertEqual(report.incompleteLayers, ["systemextensionsctl"])
         XCTAssertTrue(report.checks.contains { $0.hasPrefix("systemextensionsctl list: FAILED") }, "\(report.checks)")

@@ -130,12 +130,22 @@ public enum ItemType: String, Codable {
     case systemExtension = "system-extension"
     case kernelExtension = "kernel-extension"
     case privilegedHelper = "privileged-helper"
+    // V0.5.6 scheduled / legacy / plugin directories
+    case cronJob = "cron-job"
+    case atJob = "at-job"
+    case periodicScript = "periodic-script"
+    case powerEvent = "power-event"
+    case loginHook = "login-hook"
+    case startupItem = "startup-item"
+    case rcScript = "rc-script"
+    case emondRule = "emond-rule"
+    case plugin = "plugin"
     case helper
     case script
     case unknown
 }
 
-public enum ItemDomain: String, Codable {
+public enum ItemDomain: String, Codable, Sendable {
     case user
     case system
     case mixed
@@ -155,6 +165,12 @@ public enum EvidenceKind: String, Codable {
     case pluginkit
     case systemExtension = "system-extension"
     case helperTool = "helper-tool"
+    case cron = "cron"
+    case at = "at"
+    case pmset = "pmset"
+    case periodic = "periodic"
+    case legacy = "legacy"
+    case plugin = "plugin"
 }
 
 public struct SourceEvidence: Codable, Equatable {
@@ -195,7 +211,8 @@ extension BackgroundItem {
             return .gui
         case .launchDaemon, .systemExtension, .kernelExtension, .privilegedHelper:
             return .system
-        case .btmEntry, .appExtension, .helper, .script, .unknown:
+        case .btmEntry, .appExtension, .helper, .script, .unknown,
+             .cronJob, .atJob, .periodicScript, .powerEvent, .loginHook, .startupItem, .rcScript, .emondRule, .plugin:
             return domain == .system ? .system : .gui
         }
     }

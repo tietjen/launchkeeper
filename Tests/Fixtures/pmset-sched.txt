@@ -1,0 +1,4 @@
+Scheduled power events:
+ [0]  wake at 09/22/2026 16:38:36 by 'com.apple.alarm.user-invisible-com.apple.acmd.alarm'
+ [1]  wake at 09/22/2026 17:30:12 by 'com.apple.alarm.user-invisible-com.apple.acmd.alarm'
+ [2]  wake at 09/22/2026 18:00:00 by 'com.apple.alarm.user-visible-com.apple.donotdisturb.server.ScheduleLifetimeMonitor.timer' User visible: true
