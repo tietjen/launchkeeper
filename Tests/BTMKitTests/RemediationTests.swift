@@ -868,3 +868,62 @@ final class RemediationIdConsistencyTests: XCTestCase {
         XCTAssertFalse(reason.contains("no match"), "the leftover is visible in list and must resolve: \(reason)")
     }
 }
+
+// MARK: - V0.4.5: numeric ids only against a complete inventory
+
+final class IncompleteInventoryIdGuardTests: XCTestCase {
+    private func makeRunner(btmTimesOut: Bool) -> ScriptedCommandRunner {
+        ScriptedCommandRunner(responses: [
+            "/bin/launchctl print gui/501":
+                CommandResult(exitCode: 0, stdout: "gui/501 = {\nservices = {\n}\n}\n", stderr: ""),
+            "/bin/launchctl print-disabled gui/501":
+                CommandResult(exitCode: 0, stdout: "", stderr: ""),
+            "/usr/bin/sfltool dumpbtm": btmTimesOut
+                ? CommandResult(exitCode: -2, stdout: "", stderr: "timeout after 45s")
+                : CommandResult(exitCode: 0, stdout: "", stderr: ""),
+        ])
+    }
+
+    private let withBTM = ScanOptions(includeUser: true, includeSystem: false,
+                                      scanBTM: true, scanSignatures: false)
+
+    private func engine(home: String, btmTimesOut: Bool) -> RemediationEngine {
+        RemediationEngine(environment: RemediationEnvironment(runner: makeRunner(btmTimesOut: btmTimesOut),
+                                                              home: home, uid: 501),
+                          audit: AuditLog(directory: home + "/logs"))
+    }
+
+    /// The live shape from 2026-09-22 08:06: `list` had numbered the entry
+    /// 60, the remediation scan saw a different set, `remove 60` missed.
+    /// A missing layer must refuse numbers outright instead of resolving
+    /// them against the wrong numbering.
+    func testNumericIdRefusedWhenALayerIsMissing() throws {
+        let home = try makeUserHome(withPlists: ["com.example.alpha"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let engine = engine(home: home, btmTimesOut: true)
+        let result = engine.run(operation: .disable, target: "01", apply: false, scanOptions: withBTM)
+        guard case .refused(let reason) = result.status, reason.contains("incomplete") else {
+            return XCTFail("expected refusal, got \(result.status)")
+        }
+        XCTAssertTrue(result.messages.contains { $0.contains("sfltool dumpbtm") }, "\(result.messages)")
+        XCTAssertTrue(result.plan.isEmpty)
+        XCTAssertTrue(engine.audit.readAll().contains("refused(inventory incomplete"))
+    }
+
+    func testLabelStillResolvesWhenALayerIsMissing() throws {
+        let home = try makeUserHome(withPlists: ["com.example.alpha"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let result = engine(home: home, btmTimesOut: true)
+            .run(operation: .disable, target: "com.example.alpha", apply: false, scanOptions: withBTM)
+        XCTAssertEqual(result.status, .planned, "\(result.messages)")
+    }
+
+    func testNumericIdAcceptedWhenTheScanIsComplete() throws {
+        let home = try makeUserHome(withPlists: ["com.example.alpha"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let result = engine(home: home, btmTimesOut: false)
+            .run(operation: .disable, target: "01", apply: false, scanOptions: withBTM)
+        XCTAssertEqual(result.status, .planned, "\(result.messages)")
+        XCTAssertEqual(result.target, "gui/501/com.example.alpha")
+    }
+}

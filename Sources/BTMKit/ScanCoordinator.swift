@@ -26,10 +26,18 @@ public struct ScanReport {
     public var warnings: [String]
     /// Environment/self-check lines for `btmctl doctor`.
     public var checks: [String]
+    /// Sources that contribute ITEMS and did not answer in this run
+    /// (`launchctl print <domain>`, `sfltool dumpbtm`). Display ids are
+    /// positional, so a run missing one of these numbers the inventory
+    /// differently from a complete run — numeric addressing is unsafe then
+    /// (V0.4.5). Sources that only enrich (print-disabled, codesign, mdfind)
+    /// are not listed: they never change the item set.
+    public var incompleteLayers: [String]
     public init(items: [BackgroundItem], uncorrelated: [String],
-                warnings: [String], checks: [String] = []) {
+                warnings: [String], checks: [String] = [], incompleteLayers: [String] = []) {
         self.items = items; self.uncorrelated = uncorrelated
         self.warnings = warnings; self.checks = checks
+        self.incompleteLayers = incompleteLayers
     }
 }
 
@@ -58,6 +66,7 @@ public struct ScanCoordinator {
         let env = environment
         var warnings: [String] = []
         var checks: [String] = []
+        var incomplete: [String] = []
 
         let version = ProcessInfo.processInfo.operatingSystemVersion
         checks.append("macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)")
@@ -85,6 +94,7 @@ public struct ScanCoordinator {
                 warnings.append("launchctl print \(target) failed (exit \(printResult.exitCode)) — "
                     + "live state incomplete")
                 checks.append("launchctl print \(target): FAILED (exit \(printResult.exitCode))")
+                incomplete.append("launchctl print \(target)")
             }
             let disabledResult = env.runner.run(
                 command: "/bin/launchctl", arguments: ["print-disabled", target])
@@ -132,10 +142,17 @@ public struct ScanCoordinator {
                     + "`sfltool dumpbtm` yourself; raise the budget with "
                     + "BTMCTL_BTM_TIMEOUT=<seconds>")
                 checks.append("sfltool dumpbtm: FAILED (timeout \(Int(budget))s)")
+                incomplete.append("sfltool dumpbtm")
             } else {
                 warnings.append("sfltool dumpbtm failed (exit \(result.exitCode)) — "
                     + "BTM layer not scanned")
                 checks.append("sfltool dumpbtm: FAILED (exit \(result.exitCode))")
+                incomplete.append("sfltool dumpbtm")
+            }
+            if !incomplete.isEmpty {
+                warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
+                    + "ids are positional per scan and will not match a complete run: address "
+                    + "entries by label, not by number, until the scan is complete")
             }
         } else {
             checks.append("sfltool dumpbtm: skipped")
@@ -186,6 +203,6 @@ public struct ScanCoordinator {
             + "\(uncorrelated.count) BTM entries uncorrelated")
 
         return ScanReport(items: analyzed, uncorrelated: uncorrelated,
-                          warnings: warnings, checks: checks)
+                          warnings: warnings, checks: checks, incompleteLayers: incomplete)
     }
 }

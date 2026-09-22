@@ -230,6 +230,20 @@ public struct RemediationEngine {
             return result
         }
 
+        // Positional ids are only meaningful against the COMPLETE inventory.
+        // A missing layer (BTM timed out, launchctl print failed) renumbers
+        // everything — a number typed from an earlier, complete `list` would
+        // hit a different entry. Refuse numbers then; labels still resolve.
+        let trimmedNeedle = needle.trimmingCharacters(in: .whitespaces)
+        if !report.incompleteLayers.isEmpty, !trimmedNeedle.isEmpty,
+           trimmedNeedle.allSatisfy({ $0.isNumber }) {
+            let layers = report.incompleteLayers.joined(separator: ", ")
+            return finish(.refused("inventory incomplete — numeric ids unreliable"), target: trimmedNeedle,
+                          messages: ["inventory incomplete (\(layers)) — display ids are positional and "
+                                     + "would not match `list`; address the entry by label or name "
+                                     + "fragment instead, or run again once the scan completes"])
+        }
+
         switch TargetResolver.resolve(needle, in: report.items) {
         case .none(let needle):
             return finish(.refused("no match: \(needle)"), target: needle,

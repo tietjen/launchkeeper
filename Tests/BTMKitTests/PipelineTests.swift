@@ -179,6 +179,9 @@ final class ScanPipelineTests: XCTestCase {
         let report = ScanCoordinator(environment: env).perform(options: userOnlyOptions())
         XCTAssertTrue(report.checks.contains { $0.contains("sfltool dumpbtm: FAILED (timeout") })
         XCTAssertTrue(report.warnings.contains { $0.contains("timed out after 45s") })
+        XCTAssertEqual(report.incompleteLayers, ["sfltool dumpbtm"],
+                       "a missing item source must be named — ids are unsafe in this run")
+        XCTAssertTrue(report.warnings.contains { $0.contains("address entries by label") })
         XCTAssertEqual(report.items.count, 1, "launchd layer must still produce the inventory")
         XCTAssertEqual(report.items.first?.running, true)
     }
