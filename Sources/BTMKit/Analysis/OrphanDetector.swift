@@ -69,6 +69,20 @@ public struct OrphanDetector {
                 }
             }
 
+            // 6. (V0.4.4) BTM leftover: the record is all that is left — no
+            // plist on disk, no launchd job. Not a broken component but the
+            // trail of one already removed. `remove` has nothing to delete and
+            // BTM prunes the record itself (seen live within minutes after the
+            // plist went). ONE reason, low confidence: a note, not a work item.
+            if item.btmPresent, !item.plistPresent, !item.launchdPresent,
+               let path = item.path, path.hasPrefix("/"), path.hasSuffix(".plist"),
+               !PathUtils.exists(path, fileManager: fileManager) {
+                reasons = ["BTM leftover: plist already gone (\(path)) — nothing to remove; "
+                    + "BTM prunes the record itself, otherwise `btmctl resetbtm`"]
+                confidence = .low
+                item.metadata["btm-leftover"] = "true"
+            }
+
             if !reasons.isEmpty {
                 item.orphaned = true
                 item.orphanConfidence = confidence

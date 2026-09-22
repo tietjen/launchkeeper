@@ -37,7 +37,7 @@ public enum RemediationGate {
         // (V0.4.3, after `remove` of a disabled agent left one behind).
         if item.btmPresent, !item.plistPresent, !item.launchdPresent,
            !(operation == .enable && !item.enabled) {
-            return .denied(reason: "only a Background Task Management record remains (no launch "
+            return .denied(reason: "BTM leftover: only a Background Task Management record remains (no launch "
                 + "plist, no launchd job) — nothing here to \(operation.rawValue). sfltool has "
                 + "no per-item delete; the record is inert and BTM drops it in its own "
                 + "housekeeping (seen live within minutes after the plist went), "

@@ -66,7 +66,7 @@ public enum TableRenderer {
 
     static func flagsText(_ item: BackgroundItem) -> String {
         var flags: [String] = []
-        if item.orphaned { flags.append("ORPHAN") }
+        if item.orphaned { flags.append(item.metadata["btm-leftover"] == "true" ? "LEFTOVER" : "ORPHAN") }
         if !item.enabled { flags.append("DISABLED") }
         let short: [String: String] = [
             "temp-or-hidden-path": "TEMP/PATH",

@@ -70,15 +70,52 @@ final class OrphanDetectorTests: XCTestCase {
         XCTAssertEqual(result.orphanConfidence, .high, "live process, dead parent")
     }
 
-    func testBtmEntryWithoutBackingPlist() {
+    /// V0.4.4: a BTM record whose plist is gone and that no launchd job backs
+    /// is a LEFTOVER — the trail of a component already removed, not a broken
+    /// one. One reason, low confidence, flagged for the table; the earlier
+    /// "BTM entry without backing plist"/"executable missing" reasons would
+    /// have presented it as an open work item right after a clean `remove`.
+    func testBtmLeftoverIsOneLowConfidenceNote() {
         var item = BackgroundItem(key: "btm:16.de.x.ghost", displayName: "ghost", type: .btmEntry)
         item.btmPresent = true
         item.plistPresent = false
         item.launchdPresent = false
         item.path = "/Library/LaunchAgents/de.x.ghost.plist"   // absent by construction
+        item.executable = "/Applications/Ghost.app/Contents/MacOS/ghost"   // absent too
         let result = apply(item)
         XCTAssertTrue(result.orphaned)
-        XCTAssertEqual(result.orphanConfidence, .medium)
-        XCTAssertTrue(result.orphanReasons.contains { $0.hasPrefix("BTM entry without backing plist") })
+        XCTAssertEqual(result.orphanConfidence, .low)
+        XCTAssertEqual(result.orphanReasons.count, 1, "one note, not a pile: \(result.orphanReasons)")
+        XCTAssertTrue(result.orphanReasons[0].hasPrefix("BTM leftover"), result.orphanReasons[0])
+        XCTAssertEqual(result.metadata["btm-leftover"], "true")
+        XCTAssertTrue(TableRenderer.render([result], mode: .table).contains("LEFTOVER"))
+        XCTAssertFalse(TableRenderer.render([result], mode: .table).contains("ORPHAN"))
+    }
+
+    func testPlistBackedEntryWithMissingExecutableStaysAHardOrphan() {
+        // Same shape, but the plist is still on disk: a real broken component.
+        var item = BackgroundItem(key: "de.x.broken", displayName: "broken", type: .launchAgentSystem)
+        item.btmPresent = true
+        item.plistPresent = true
+        item.path = "/Library/LaunchAgents/de.x.broken.plist"
+        item.executable = "/Applications/Ghost.app/Contents/MacOS/ghost"
+        let result = apply(item)
+        XCTAssertEqual(result.orphanConfidence, .high)
+        XCTAssertTrue(result.orphanReasons.contains { $0.hasPrefix("executable missing") })
+        XCTAssertNil(result.metadata["btm-leftover"])
+        XCTAssertTrue(TableRenderer.render([result], mode: .table).contains("ORPHAN"))
+    }
+
+    func testLaunchdBackedBtmEntryIsNotALeftover() {
+        // launchd still holds the job → the zombie shape: not a leftover,
+        // the executable-missing reason stays (and `remove` points at disable).
+        var item = BackgroundItem(key: "de.x.zombie", displayName: "zombie", type: .unknown)
+        item.btmPresent = true
+        item.launchdPresent = true
+        item.loaded = true
+        item.executable = "/Applications/Ghost.app/Contents/MacOS/ghost"
+        let result = apply(item)
+        XCTAssertEqual(result.orphanConfidence, .high)
+        XCTAssertNil(result.metadata["btm-leftover"])
     }
 }
