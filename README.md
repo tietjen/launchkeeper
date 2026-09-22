@@ -65,8 +65,9 @@ Remediation rules, enforced in code (not docs):
 btmctl is one universal CLI binary (Apple silicon + Intel), signed with a
 Developer ID and notarized by Apple. Test releases are published on Gitea:
 <https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases>
-(the repository is private while the tool is in multi-device testing, so a
-Gitea login or personal access token is required).
+(the source repository stays private while the tool is in multi-device
+testing; the **Releases** unit is set to anonymous read, so the assets
+download without a login or token).
 
 ### Option A — prebuilt release (no Xcode needed)
 
@@ -74,10 +75,9 @@ Gitea login or personal access token is required).
    from the release page. Prefer `curl` over the browser: files fetched by
    curl carry no quarantine flag, so Gatekeeper never gets involved.
    ```
-   TOKEN=<Gitea personal access token, scope read:repository>
    BASE=https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases/download/v0.4.1
-   curl -fsSLO -H "Authorization: token $TOKEN" "$BASE/btmctl-v0.4.1-macos-universal.tar.gz"
-   curl -fsSLO -H "Authorization: token $TOKEN" "$BASE/SHA256SUMS"
+   curl -fsSLO "$BASE/btmctl-v0.4.1-macos-universal.tar.gz"
+   curl -fsSLO "$BASE/SHA256SUMS"
    ```
    (Copying the tarball over AirDrop, scp or a NAS share works just as well.)
 2. **Verify** the checksum, then unpack:
