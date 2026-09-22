@@ -33,11 +33,15 @@ public struct ScanReport {
     /// (V0.4.5). Sources that only enrich (print-disabled, codesign, mdfind)
     /// are not listed: they never change the item set.
     public var incompleteLayers: [String]
+    /// App / developer rows of Background Task Management (V0.5).
+    public var btmContainers: [BTMContainer]
     public init(items: [BackgroundItem], uncorrelated: [String],
-                warnings: [String], checks: [String] = [], incompleteLayers: [String] = []) {
+                warnings: [String], checks: [String] = [], incompleteLayers: [String] = [],
+                btmContainers: [BTMContainer] = []) {
         self.items = items; self.uncorrelated = uncorrelated
         self.warnings = warnings; self.checks = checks
         self.incompleteLayers = incompleteLayers
+        self.btmContainers = btmContainers
     }
 }
 
@@ -112,20 +116,35 @@ public struct ScanCoordinator {
 
         // ---- Stage 3: BTM. Failure degrades gracefully: empty records + warning.
         var btm: [BTMRecord] = []
+        var containers: [BTMContainer] = []
         if options.scanBTM {
             // One attempt, no blind retry: sfltool either answers within seconds
             // or is stuck — cold start after an OS upgrade, sandbox, permissions.
             // A blind second attempt only doubles the dead wait; the warning
             // names the causes and the user decides. Budget: LAUNCHKEEPER_BTM_TIMEOUT.
             let environment = ProcessInfo.processInfo.environment
+            // 150 s: the FIRST dumpbtm after the daemon sat idle took 76 s and 97 s
+            // live (2026-09-22, macOS 27 — BTM re-validates every registered bundle,
+            // large apps dominate), the next one 1–5 s. 45 s cut that off.
             let budget = (environment["LAUNCHKEEPER_BTM_TIMEOUT"] ?? environment["BTMCTL_BTM_TIMEOUT"])
-                .flatMap { Double($0) } ?? 45
+                .flatMap { Double($0) } ?? 150
+            // A cold daemon answers after a minute; without a word the scan
+            // looks frozen. The hint fires only if the call is still running
+            // after 5 s (test doubles answer instantly and never see it).
+            let hint = DispatchWorkItem {
+                FileHandle.standardError.write(Data(("waiting for sfltool dumpbtm — the BTM daemon's "
+                    + "first answer after idle can take a minute or two (budget \(Int(budget)) s)\n").utf8))
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: hint)
             let result = env.runner.run(command: "/usr/bin/sfltool",
                                         arguments: ["dumpbtm"], timeout: budget)
+            hint.cancel()
             if result.exitCode == 0 {
                 let (records, parseWarnings) = BTMDumpParser.parse(result.stdout)
                 btm = records
+                containers = BTMContainerIndex.build(from: records)
                 checks.append("sfltool dumpbtm: ok (\(records.count) records)")
+                checks.append("btm containers: \(containers.count) app/developer rows")
                 if records.isEmpty {
                     warnings.append("sfltool dumpbtm produced no parsable records")
                 }
@@ -137,11 +156,11 @@ public struct ScanCoordinator {
                 // run), while a sandboxed or permission-blocked call never
                 // answers. Name both causes, claim neither.
                 warnings.append("sfltool dumpbtm timed out after \(Int(budget))s — "
-                    + "BTM layer not scanned. Typical causes: first run after a macOS "
-                    + "upgrade (the BTM daemon is migrating its store — simply run "
-                    + "again) or a blocked call (sandbox/permissions). Check with "
-                    + "`sfltool dumpbtm` yourself; raise the budget with "
-                    + "LAUNCHKEEPER_BTM_TIMEOUT=<seconds>")
+                    + "BTM layer not scanned. Typical causes: the first call after the "
+                    + "BTM daemon sat idle or after a macOS upgrade (it can take a minute or "
+                    + "two, the next call takes seconds — simply run again) or a "
+                    + "blocked call (sandbox/permissions). Check with `sfltool dumpbtm` "
+                    + "yourself; raise the budget with LAUNCHKEEPER_BTM_TIMEOUT=<seconds>")
                 checks.append("sfltool dumpbtm: FAILED (timeout \(Int(budget))s)")
                 incomplete.append("sfltool dumpbtm")
             } else {
@@ -198,12 +217,18 @@ public struct ScanCoordinator {
         }
         OrphanDetector(fileManager: env.fileManager).apply(to: &analyzed)
         RiskAnalyzer(fileManager: env.fileManager).apply(to: &analyzed)
+        // V0.5: control matrix + provenance, after orphan detection (both read it).
+        ControlAnalyzer(fileManager: env.fileManager,
+                        launchDirs: BackupEnvironment(fileManager: env.fileManager, home: env.home).launchDirs)
+            .apply(to: &analyzed)
+        ProvenanceResolver(fileManager: env.fileManager).apply(to: &analyzed)
 
         let orphanCount = analyzed.filter { $0.orphaned }.count
         checks.append("\(analyzed.count) items, \(orphanCount) orphaned, "
             + "\(uncorrelated.count) BTM entries uncorrelated")
 
         return ScanReport(items: analyzed, uncorrelated: uncorrelated,
-                          warnings: warnings, checks: checks, incompleteLayers: incomplete)
+                          warnings: warnings, checks: checks, incompleteLayers: incomplete,
+                          btmContainers: containers)
     }
 }

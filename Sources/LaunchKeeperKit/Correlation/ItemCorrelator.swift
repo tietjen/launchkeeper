@@ -94,16 +94,22 @@ public struct ItemCorrelator {
             var matchKey: String?
             var confidence: Confidence = .medium
 
-            if let url = rec.url, url.hasSuffix(".plist") {
+            // Only launchd-shaped records correlate with plists and jobs. A
+            // login item, QuickLook or Spotlight registration is its OWN
+            // component even when its bundle id core equals a launch agent's
+            // label (live: Docker's LoginItems helper vs. com.docker.helper) —
+            // merging it made the login item vanish from the inventory (V0.5.1).
+            let launchdShaped = rec.isServiceLike || rec.url?.hasSuffix(".plist") == true
+            if launchdShaped, let url = rec.url, url.hasSuffix(".plist") {
                 let label = (url as NSString).lastPathComponent
                     .replacingOccurrences(of: ".plist", with: "")
                 if accum[label] != nil { matchKey = label; confidence = .high }
             }
-            if matchKey == nil {
+            if launchdShaped, matchKey == nil {
                 let core = stripIdentifierPrefix(rec.identifier)
                 if !core.isEmpty, accum[core] != nil { matchKey = core; confidence = .high }
             }
-            if matchKey == nil, let exec = rec.executablePath {
+            if launchdShaped, matchKey == nil, let exec = rec.executablePath {
                 let canon = PathUtils.canonicalize(exec, fileManager: fileManager)
                 if let hit = accum.first(where: { entry in
                     (entry.value.executable.map { PathUtils.canonicalize($0, fileManager: fileManager) } == canon)
@@ -142,6 +148,9 @@ public struct ItemCorrelator {
                 item.developer = item.developer ?? rec.developerName
                 if item.executable == nil { item.executable = rec.executablePath }
                 item.metadata["btm-disposition"] = rec.fields["Disposition"] ?? ""
+                item.metadata["btm-type"] = rec.typeDescription
+                item.metadata["btm-identifier"] = rec.identifier
+                if let parent = rec.parentIdentifier { item.metadata["btm-parent"] = parent }
                 if rec.isEnabled == false { item.enabled = false }
                 applyParent(to: &item)
                 if (rec.isServiceLike || rec.url?.hasSuffix(".plist") == true), matchKey == nil {
@@ -183,6 +192,10 @@ public struct ItemCorrelator {
             item.teamIdentifier = rec.teamIdentifier
             item.bundleIdentifier = rec.bundleIdentifier
             item.metadata["btm-disposition"] = rec.fields["Disposition"] ?? ""
+            item.metadata["btm-type"] = rec.typeDescription
+            item.metadata["btm-identifier"] = rec.identifier
+            if let parent = rec.parentIdentifier { item.metadata["btm-parent"] = parent }
+            item.category = Self.category(forBTMType: rec.typeDescription)
             if let enabled = rec.isEnabled { item.enabled = enabled }
             if let label = item.label, isDisabled(label: label, in: input.disabled) { item.enabled = false }
             item.sources.append(SourceEvidence(kind: .btm,
@@ -217,6 +230,17 @@ public struct ItemCorrelator {
             items[i].id = String(format: "%02d", i + 1)
         }
         return (items, uncorrelated)
+    }
+
+    /// Category of a BTM-only record by its BTM type: launchd-shaped records
+    /// stay Launch Items, login items are Login Items, everything else
+    /// (QuickLook, Spotlight, dock tiles, app extensions) is an App Extension.
+    static func category(forBTMType type: String) -> ItemCategory {
+        switch type {
+        case "legacy agent", "legacy daemon", "agent", "daemon": return .launchItems
+        case "login item", "background app refresh": return .loginItems
+        default: return .appExtensions
+        }
     }
 
     private func domainRank(_ domain: ItemDomain) -> Int {

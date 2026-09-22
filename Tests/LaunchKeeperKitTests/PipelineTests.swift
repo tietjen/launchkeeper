@@ -173,12 +173,12 @@ final class ScanPipelineTests: XCTestCase {
             "/bin/launchctl print-disabled gui/501":
                 CommandResult(exitCode: 0, stdout: "", stderr: ""),
             "/usr/bin/sfltool dumpbtm":
-                CommandResult(exitCode: -2, stdout: "", stderr: "timeout after 45s"),
+                CommandResult(exitCode: -2, stdout: "", stderr: "timeout after 150s"),
         ])
         let env = ScanEnvironment(runner: runner, home: home, uid: 501)
         let report = ScanCoordinator(environment: env).perform(options: userOnlyOptions())
         XCTAssertTrue(report.checks.contains { $0.contains("sfltool dumpbtm: FAILED (timeout") })
-        XCTAssertTrue(report.warnings.contains { $0.contains("timed out after 45s") })
+        XCTAssertTrue(report.warnings.contains { $0.contains("timed out after 150s") })
         XCTAssertEqual(report.incompleteLayers, ["sfltool dumpbtm"],
                        "a missing item source must be named — ids are unsafe in this run")
         XCTAssertTrue(report.warnings.contains { $0.contains("address entries by label") })

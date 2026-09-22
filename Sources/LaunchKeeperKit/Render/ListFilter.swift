@@ -9,6 +9,8 @@ public struct ListFilter {
     public var systemOnly = false
     /// true = keep Apple-internal noise (default view hides it).
     public var includeAll = false
+    /// V0.5: only this Autoruns-style category.
+    public var category: ItemCategory?
 
     public init() {}
 
@@ -23,6 +25,7 @@ public struct ListFilter {
             if disabledOnly && item.enabled { return false }
             if userOnly && item.domain == .system { return false }
             if systemOnly && item.domain == .user { return false }
+            if let category, item.category != category { return false }
             if !includeAll {
                 if Self.isAppleInternal(item) { return false }
                 if !narrowing, Self.isTransientNoise(item) { return false }

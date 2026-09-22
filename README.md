@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.0)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.1)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -177,6 +177,13 @@ launchkeeper inspect <id|name>       # one entry in full detail (by id or fragme
 launchkeeper doctor                  # health of the scan itself + orphan summary
 launchkeeper doctor --json           # machine-readable health report
 
+# V0.5 — the Autoruns-style dimensions
+launchkeeper list --category <name>  # one category: launch-items, login-items, app-extensions, …
+launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
+                                     # the inventory: "Open at Login" + "Allow in the Background",
+                                     # one row per app/developer with its switch and components
+launchkeeper background --json       # the same view, machine-readable
+
 # V0.2+ — remediation (all dry-run unless --apply)
 launchkeeper disable <id|name>       # show the disable plan (override + unload)
 launchkeeper disable <id|name> --apply   # execute it, then verify against launchd
@@ -273,6 +280,32 @@ ID  NAME                    STATE    CONF  REASON
 `doctor` checks the *tool's* view, not your system: if a data source
 failed, it says so instead of pretending the inventory is complete.
 
+## Categories, control matrix, provenance (V0.5)
+
+Every item carries three more dimensions, visible in `inspect` and `--json`:
+
+- **category** — the Autoruns-style tab it belongs to (`launch-items`,
+  `login-items`, `app-extensions`, …; more scanners follow in V0.5.x).
+  `list --category <name>` filters by it.
+- **control** — what launchkeeper can do with it, computed from the *same*
+  gate the mutating commands consult: `reversible` (disable/enable),
+  `removable` (an orphaned launch plist that passes all four `remove`
+  locks) or `display-only` with the reason and where the switch lives
+  instead (Apple/System territory, Background Task Management leftovers,
+  extensions managed by System Settings).
+- **origin** — where it came from, from evidence already in hand: Apple,
+  Homebrew, Mac App Store receipt; package receipts arrive with V0.6.
+  Unknown stays unknown.
+
+`background` rebuilds the System Settings › General › Login Items &
+Extensions pane: "Open at Login" (login items) and "Allow in the Background"
+(one row per app or developer, its components beneath). The switch state is
+**derived from the components** — the container record's own BTM bit is not
+the switch (it reads `disabled` for 48 of 49 containers on a healthy Mac);
+the one exception is an app registered by itself without components
+(`app-level`), where that bit is the switch. launchkeeper never writes to
+Background Task Management; the switch stays in System Settings.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -330,7 +363,7 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 160-test suite includes the V0.2 write
+macOS 26.6.2 without sudo). The 184-test suite includes the V0.2 write
 paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
 not manufacture a gone-verdict" property) and the guarded `resetbtm`
@@ -349,12 +382,14 @@ tested against a stateful in-memory BTM store behind the same runner seam
 covering dry-run executes nothing, no snapshot → no reset, unreadable
 database → refused, and failed/timed-out post-dump → appliedFailed.
 
-BTM scan timeout: one `sfltool dumpbtm` attempt with a 45 s budget
-(`LAUNCHKEEPER_BTM_TIMEOUT` to override). A healthy dump completes in seconds.
-A timeout has two typical causes the tool cannot tell apart: the first run
-after a macOS upgrade (the BTM daemon migrates its store — seen live on the
-26 → 27 upgrade: 45 s timeout, 3 s on the next run) or a blocked call
-(sandbox/permissions). The report names both and does not retry into a
+BTM scan timeout: one `sfltool dumpbtm` attempt with a 150 s budget
+(`LAUNCHKEEPER_BTM_TIMEOUT` to override). A warm dump completes in seconds;
+the first call after the BTM daemon sat idle (or after a macOS upgrade) can
+take a minute or two — seen live: 76 s and 97 s, then 1–5 s (BTM re-validates
+every registered bundle; large apps dominate) — and the scan says so on stderr
+after five seconds. A timeout kills only the client; the daemon keeps working,
+so the next run is fast. A timeout has two typical causes the tool cannot
+tell apart: that cold start, or a blocked call (sandbox/permissions). The report names both and does not retry into a
 longer dead wait; running again is the user's call.
 
 BTM URL formats: macOS 26 writes `URL:` as a percent-encoded file URL
@@ -397,6 +432,11 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.1** ✅ — the Autoruns-style dimensions on every item (category,
+  control matrix as data, provenance), `list --category`, and `background`:
+  the Login Items & Extensions pane rebuilt from the inventory with the
+  switch state derived from the components; BTM budget 150 s with a
+  cold-start hint
 - **V0.4.5** ✅ — numeric ids are accepted only against a complete
   inventory: when an item source did not answer (`sfltool dumpbtm` timeout,
   `launchctl print` failure) the run is marked incomplete, `list` says so,

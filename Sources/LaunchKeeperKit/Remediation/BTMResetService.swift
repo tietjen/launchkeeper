@@ -31,13 +31,13 @@ public struct BTMResetEnvironment {
     /// Root for the audit snapshots (full dumpbtm text, one file per reset).
     public var snapshotsRoot: String
     /// Same budget as the scan's BTM stage: a healthy dump takes seconds.
-    public var btmTimeout: TimeInterval = 45
+    public var btmTimeout: TimeInterval = 150
 
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
                 home: String = NSHomeDirectory(),
                 snapshotsRoot: String? = nil,
-                btmTimeout: TimeInterval = 45) {
+                btmTimeout: TimeInterval = 150) {
         self.runner = runner
         self.fileManager = fileManager
         self.home = home

@@ -101,3 +101,67 @@ public enum BTMDumpParser {
         return (records, warnings)
     }
 }
+// MARK: - Containers (System Settings › Login Items & Extensions rows)
+
+/// One app or developer row as System Settings shows it. BTM keeps such a
+/// record per UID section; the same identifier merges into ONE container.
+///
+/// Its `Disposition` bit is NOT the user's switch: on a healthy Mac nearly
+/// every container reads `disabled` while its components read `enabled`
+/// (seen live 2026-09-22: 48 of 49). The switch state is therefore derived
+/// from the components in `BackgroundView`; the raw bit is kept for the JSON.
+public struct BTMContainer: Codable, Equatable {
+    public enum Kind: String, Codable { case app, developer }
+    public var identifier: String
+    public var name: String
+    public var kind: Kind
+    public var teamIdentifier: String?
+    public var bundlePath: String?
+    public var dispositionTokens: [String]
+    /// `Embedded Item Identifiers` — usually incomplete; components also
+    /// point back via their own `Parent Identifier`.
+    public var embedded: [String]
+    public var uids: [Int]
+
+    public init(identifier: String, name: String, kind: Kind, teamIdentifier: String? = nil,
+                bundlePath: String? = nil, dispositionTokens: [String] = [],
+                embedded: [String] = [], uids: [Int] = []) {
+        self.identifier = identifier; self.name = name; self.kind = kind
+        self.teamIdentifier = teamIdentifier; self.bundlePath = bundlePath
+        self.dispositionTokens = dispositionTokens; self.embedded = embedded; self.uids = uids
+    }
+}
+
+public enum BTMContainerIndex {
+    public static func build(from records: [BTMRecord]) -> [BTMContainer] {
+        var byID: [String: BTMContainer] = [:]
+        var order: [String] = []
+        for rec in records {
+            let kind: BTMContainer.Kind
+            switch rec.typeDescription {
+            case "app": kind = .app
+            case "developer": kind = .developer
+            default: continue
+            }
+            let id = rec.identifier.isEmpty ? "uid\(rec.sectionUID):" + rec.name : rec.identifier
+            let name = (rec.name.isEmpty || rec.name == "(null)") ? (rec.developerName ?? rec.identifier) : rec.name
+            if var existing = byID[id] {
+                if !existing.uids.contains(rec.sectionUID) { existing.uids.append(rec.sectionUID) }
+                for child in rec.trailingBlock where !existing.embedded.contains(child) {
+                    existing.embedded.append(child)
+                }
+                if existing.bundlePath == nil, let url = rec.url, url.hasPrefix("/") { existing.bundlePath = url }
+                if existing.teamIdentifier == nil { existing.teamIdentifier = rec.teamIdentifier }
+                byID[id] = existing
+            } else {
+                byID[id] = BTMContainer(identifier: id, name: name, kind: kind,
+                                        teamIdentifier: rec.teamIdentifier,
+                                        bundlePath: (rec.url?.hasPrefix("/") == true) ? rec.url : nil,
+                                        dispositionTokens: rec.dispositionTokens,
+                                        embedded: rec.trailingBlock, uids: [rec.sectionUID])
+                order.append(id)
+            }
+        }
+        return order.compactMap { byID[$0] }
+    }
+}

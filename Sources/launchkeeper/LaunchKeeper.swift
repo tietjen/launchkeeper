@@ -58,6 +58,10 @@ struct ListCommand: ParsableCommand {
     var system = false
     @Flag(name: .customLong("all"), help: "include Apple-internal entries")
     var all = false
+    @Option(name: .customLong("category"),
+            help: ArgumentHelp("only this category: "
+                               + ItemCategory.allCases.map(\.rawValue).joined(separator: ", ")))
+    var category: String?
 
     mutating func run() throws {
         let userOnly = user && !system
@@ -69,6 +73,13 @@ struct ListCommand: ParsableCommand {
         filter.userOnly = userOnly
         filter.systemOnly = systemOnly
         filter.includeAll = all
+        if let category {
+            guard let parsed = ItemCategory(rawValue: category) else {
+                throw ValidationError("unknown category '\(category)' — one of: "
+                    + ItemCategory.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            filter.category = parsed
+        }
 
         let report = runScan()
         let rows = filter.apply(to: report.items)
@@ -165,6 +176,34 @@ struct DoctorCommand: ParsableCommand {
         let orphans = report.items.filter { $0.orphaned }.count
         if orphans > 0 {
             print("\n\(orphans) orphaned entries — inspect with: launchkeeper list --orphans")
+        }
+    }
+}
+
+struct BackgroundCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "background",
+        abstract: """
+        The Login Items & Extensions pane, rebuilt from the inventory (read-only).
+
+        "Open at Login" and "Allow in the Background" as System Settings shows
+        them: one row per app or developer with its switch state and the
+        components beneath. The switch is derived from the components; the
+        switch itself lives in System Settings — launchkeeper never writes
+        to Background Task Management.
+        """)
+
+    @Flag(name: .customLong("json"), help: "machine-readable view")
+    var json = false
+
+    mutating func run() throws {
+        let report = runScan()
+        let view = BackgroundView.build(from: report)
+        if json {
+            print(try JSONRenderer.encode(view))
+        } else {
+            print(view.renderText())
+            emitWarnings(report)
         }
     }
 }
@@ -511,7 +550,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.5.0).
+        Background-service inventory + app correlation + gated remediation (V0.5.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -520,8 +559,9 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.5.0",
+        version: "0.5.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
+                      BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,
                       RemoveCommand.self, ResetBtmCommand.self],

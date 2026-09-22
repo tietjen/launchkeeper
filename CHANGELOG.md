@@ -5,10 +5,30 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased]
+## [Unreleased] — 0.5.1
 
 ### Added
+- Every item carries `category` (Autoruns-style tab), `control` (what
+  launchkeeper may do with it — reversible / removable / display-only with
+  the reason, computed from the same gate the mutating commands use) and
+  `provenance` (Apple, Homebrew, Mac App Store receipt; unknown stays
+  unknown). Shown by `inspect` and in `--json`; `list --category <name>`.
+- `background`: the System Settings › Login Items & Extensions pane rebuilt
+  from the inventory — "Open at Login" and "Allow in the Background", one row
+  per app/developer with the switch state derived from its components (the
+  container's own BTM bit is not the switch, except for app-level
+  registrations without components) and the components beneath. `--json`
+  for scripts. Read-only; the switch stays in System Settings.
 - Homebrew tap `tietjen/homebrew-tap` (`brew install tietjen/tap/launchkeeper`).
+
+### Changed
+- BTM scan budget 45 s → 150 s: the first `sfltool dumpbtm` after the daemon
+  sat idle took 76 s and 97 s live (BTM re-validates every registered bundle),
+  the next one seconds. After five seconds the scan says on stderr that it is
+  waiting.
+- Login items and other non-launchd BTM registrations no longer merge into a
+  launch agent with the same bundle-id core; they are their own components
+  (live: a LoginItems helper had vanished behind a LaunchAgent).
 
 ### Fixed
 - `scripts/release.sh` fails unless Apple's notarization status is

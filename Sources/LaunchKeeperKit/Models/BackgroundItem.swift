@@ -43,6 +43,11 @@ public struct BackgroundItem: Codable {
     public var appPresent: Bool?        // parent app / login-item app exists on disk
     public var metadata: [String: String]
 
+    // V0.5: the Autoruns-style dimensions.
+    public var category: ItemCategory
+    public var control: Controllability?
+    public var provenance: Provenance?
+
     public init(
         id: String = "",
         key: String,
@@ -73,7 +78,10 @@ public struct BackgroundItem: Codable {
         launchdPresent: Bool = false,
         plistPresent: Bool = false,
         appPresent: Bool? = nil,
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        category: ItemCategory = .launchItems,
+        control: Controllability? = nil,
+        provenance: Provenance? = nil
     ) {
         self.id = id
         self.key = key
@@ -105,6 +113,9 @@ public struct BackgroundItem: Codable {
         self.plistPresent = plistPresent
         self.appPresent = appPresent
         self.metadata = metadata
+        self.category = category
+        self.control = control
+        self.provenance = provenance
     }
 }
 

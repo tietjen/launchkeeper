@@ -103,6 +103,14 @@ public enum InspectRenderer {
         lines.append("  state:     \(TableRenderer.stateText(item))"
             + (item.pid.map { " (pid \($0))" } ?? ""))
         lines.append("  enabled:   \(item.enabled)")
+        lines.append("  category:  \(item.category.rawValue)")
+        if let control = item.control {
+            let actions = control.actions.isEmpty ? "" : " (" + control.actions.joined(separator: ", ") + ")"
+            lines.append("  control:   \(control.level.rawValue)\(actions) — \(control.reason)")
+        }
+        if let origin = item.provenance {
+            lines.append("  origin:    \(origin.kind.rawValue)" + (origin.detail.map { " (\($0))" } ?? ""))
+        }
 
         if let path = item.path { lines.append("  path:      \(path)") }
         if let exec = item.executable {
