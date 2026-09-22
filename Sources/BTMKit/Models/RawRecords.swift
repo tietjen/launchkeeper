@@ -61,15 +61,35 @@ public struct BTMRecord: Equatable {
     public var name: String { fields["Name"] ?? "" }
     public var typeDescription: String { fields["Type"]?.components(separatedBy: "(").first?.trimmingCharacters(in: .whitespaces) ?? "" }
     public var identifier: String { fields["Identifier"] ?? "" }
+    /// Path form of the `URL:` field, normalized for on-disk probes. macOS 26
+    /// writes it as a percent-encoded file URL (`file:///Applications/My%20App.app/`),
+    /// macOS 27 as a plain path (`/Applications/My App.app`). Both must yield the
+    /// same path, or every existence check on a name with a space is a false
+    /// negative — V0.4.1 fixed two "parent application bundle missing" false
+    /// positives on a real machine that came from exactly this.
     public var url: String? {
         guard let raw = fields["URL"], !raw.isEmpty, raw != "(null)" else { return nil }
-        return raw.replacingOccurrences(of: "file://", with: "")
+        return BTMRecord.normalizePath(raw)
     }
     /// Only absolute paths count — relative "Contents/…" fragments are kept in
     /// `fields` verbatim but must not drive existence or signature checks.
     public var executablePath: String? {
-        guard let raw = fields["Executable Path"], raw.hasPrefix("/") else { return nil }
-        return raw
+        guard let raw = fields["Executable Path"] else { return nil }
+        let path = BTMRecord.normalizePath(raw)
+        guard path.hasPrefix("/") else { return nil }
+        return path
+    }
+
+    /// `file://` prefix off, percent-encoding decoded, one trailing slash
+    /// dropped (`…/My App.app/` → `…/My App.app`, so bundle-suffix checks
+    /// match). Undecodable input is returned as-is rather than dropped: an odd
+    /// path is still evidence, an empty one is not.
+    static func normalizePath(_ raw: String) -> String {
+        var path = raw
+        if path.hasPrefix("file://") { path = String(path.dropFirst("file://".count)) }
+        if path.contains("%"), let decoded = path.removingPercentEncoding { path = decoded }
+        if path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        return path
     }
     public var bundleIdentifier: String? { fields["Bundle Identifier"] }
     public var teamIdentifier: String? { fields["Team Identifier"] }

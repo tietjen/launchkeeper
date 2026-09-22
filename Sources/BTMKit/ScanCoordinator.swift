@@ -104,8 +104,9 @@ public struct ScanCoordinator {
         var btm: [BTMRecord] = []
         if options.scanBTM {
             // One attempt, no blind retry: sfltool either answers within seconds
-            // or is genuinely blocked (sandbox/no permission) — a second attempt
-            // only doubles the dead wait. Budget override: BTMCTL_BTM_TIMEOUT.
+            // or is stuck — cold start after an OS upgrade, sandbox, permissions.
+            // A blind second attempt only doubles the dead wait; the warning
+            // names the causes and the user decides. Budget: BTMCTL_BTM_TIMEOUT.
             let budget = ProcessInfo.processInfo.environment["BTMCTL_BTM_TIMEOUT"]
                 .flatMap { Double($0) } ?? 45
             let result = env.runner.run(command: "/usr/bin/sfltool",
@@ -119,9 +120,17 @@ public struct ScanCoordinator {
                 }
                 warnings.append(contentsOf: parseWarnings.prefix(20))
             } else if result.exitCode == -2 {
+                // The tool cannot tell WHY it timed out: the first run after a
+                // macOS upgrade warms up the BTM daemon (store migration — seen
+                // live on the 26 → 27 upgrade: 45 s timeout, 3 s on the next
+                // run), while a sandboxed or permission-blocked call never
+                // answers. Name both causes, claim neither.
                 warnings.append("sfltool dumpbtm timed out after \(Int(budget))s — "
-                    + "BTM layer not scanned (blocked, not slow: a healthy dump "
-                    + "takes seconds; run `sfltool dumpbtm` yourself to check)")
+                    + "BTM layer not scanned. Typical causes: first run after a macOS "
+                    + "upgrade (the BTM daemon is migrating its store — simply run "
+                    + "again) or a blocked call (sandbox/permissions). Check with "
+                    + "`sfltool dumpbtm` yourself; raise the budget with "
+                    + "BTMCTL_BTM_TIMEOUT=<seconds>")
                 checks.append("sfltool dumpbtm: FAILED (timeout \(Int(budget))s)")
             } else {
                 warnings.append("sfltool dumpbtm failed (exit \(result.exitCode)) — "

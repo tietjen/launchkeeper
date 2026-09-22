@@ -94,7 +94,7 @@ public struct BTMResetService {
                                                         ok: Bool,
                                                         notes: [String]) {
         let fm = env.fileManager
-        var formatter = DateFormatter()
+        let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         formatter.timeZone = TimeZone(identifier: "UTC")
         let name = formatter.string(from: now) + "Z"
@@ -141,7 +141,7 @@ public struct BTMResetService {
         }
 
         let proposedName = { () -> String in
-            var f = DateFormatter()
+            let f = DateFormatter()
             f.dateFormat = "yyyy-MM-dd-HHmmss"
             f.timeZone = TimeZone(identifier: "UTC")
             return f.string(from: Date()) + "Z"

@@ -3,3 +3,4 @@
 .claude/
 *.xcodeproj
 .DS_Store
+dist/

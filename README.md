@@ -1,4 +1,4 @@
-# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4)
+# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4.1)
 
 Read-only CLI for taking stock of what macOS starts in the background:
 LaunchAgents, LaunchDaemons, live `launchd` state, Background Task
@@ -59,6 +59,74 @@ Remediation rules, enforced in code (not docs):
   consulted ONLY when the bundle path is provably gone and a bundle id is
   known — a wedged or erroring index degrades to `unknown`, never to a
   "gone" verdict, and a missing id means no query at all.
+
+## Installation (macOS 14+)
+
+btmctl is one universal CLI binary (Apple silicon + Intel), signed with a
+Developer ID. Test releases are published on Gitea:
+<https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases>
+(the repository is private while the tool is in multi-device testing, so a
+Gitea login or personal access token is required).
+
+### Option A — prebuilt release (no Xcode needed)
+
+1. **Download** `btmctl-vX.Y.Z-macos-universal.tar.gz` and `SHA256SUMS`
+   from the release page. Prefer `curl` over the browser: files fetched by
+   curl carry no quarantine flag, so Gatekeeper never gets involved.
+   ```
+   TOKEN=<Gitea personal access token, scope read:repository>
+   BASE=https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases/download/v0.4.1
+   curl -fsSLO -H "Authorization: token $TOKEN" "$BASE/btmctl-v0.4.1-macos-universal.tar.gz"
+   curl -fsSLO -H "Authorization: token $TOKEN" "$BASE/SHA256SUMS"
+   ```
+   (Copying the tarball over AirDrop, scp or a NAS share works just as well.)
+2. **Verify** the checksum, then unpack:
+   ```
+   shasum -a 256 -c SHA256SUMS
+   tar -xzf btmctl-v0.4.1-macos-universal.tar.gz
+   ```
+3. **Install** into your PATH (`/usr/local/bin` needs sudo once):
+   ```
+   sudo install -m 755 btmctl-v0.4.1-macos-universal/btmctl /usr/local/bin/btmctl
+   ```
+4. **Check the signature and run the first scan:**
+   ```
+   codesign -dv --verbose=2 /usr/local/bin/btmctl   # Authority=Developer ID Application: Jan Tietjen (Y2LTPLFG6D)
+   btmctl --version                                   # 0.4.1
+   btmctl doctor                                      # read-only health check
+   ```
+   The first `doctor` after a macOS upgrade may report the BTM layer as
+   timed out — the BTM daemon is migrating its store; run it again.
+
+**If you downloaded with a browser** (Safari, Finder): the file carries the
+quarantine flag. The test builds are Developer-ID-signed but not yet
+notarized, so Gatekeeper will refuse a quarantined copy. Clear the flag
+before installing:
+```
+xattr -d com.apple.quarantine btmctl-v0.4.1-macos-universal/btmctl
+```
+
+**Uninstall:** `sudo rm /usr/local/bin/btmctl`. btmctl keeps its data in
+`~/Library/Logs/btmctl/operations.log` (audit log) and
+`~/Library/Application Support/btmctl/` (backups, BTM snapshots) — delete
+those only if you no longer need the undo history.
+
+### Option B — build from source (Xcode 16+ / Swift 6)
+
+```
+git clone ssh://git@git.dev.paranoidsecurity.de:2222/tj/macos-housecleaning-tool.git
+cd macos-housecleaning-tool
+swift build -c release
+sudo install -m 755 .build/release/btmctl /usr/local/bin/btmctl
+```
+
+### Cutting a release (maintainer)
+
+```
+scripts/release.sh 0.4.1                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
+scripts/release.sh 0.4.1 --notarize       # + Apple notarization (keychain profile, see script header)
+scripts/release.sh 0.4.1 --upload         # + tag v0.4.1, Gitea release with assets (rbw must be unlocked)
+```
 
 ## Usage
 
@@ -220,7 +288,7 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 122-test suite includes the V0.2 write
+macOS 26.6.2 without sudo). The 132-test suite includes the V0.2 write
 paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
 not manufacture a gone-verdict" property) and the guarded `resetbtm`
@@ -240,9 +308,18 @@ covering dry-run executes nothing, no snapshot → no reset, unreadable
 database → refused, and failed/timed-out post-dump → appliedFailed.
 
 BTM scan timeout: one `sfltool dumpbtm` attempt with a 45 s budget
-(`BTMCTL_BTM_TIMEOUT` to override). A healthy dump completes in seconds;
-a timeout means the call is blocked (sandbox/permissions), and the
-report says so honestly instead of retrying into a longer dead wait.
+(`BTMCTL_BTM_TIMEOUT` to override). A healthy dump completes in seconds.
+A timeout has two typical causes the tool cannot tell apart: the first run
+after a macOS upgrade (the BTM daemon migrates its store — seen live on the
+26 → 27 upgrade: 45 s timeout, 3 s on the next run) or a blocked call
+(sandbox/permissions). The report names both and does not retry into a
+longer dead wait; running again is the user's call.
+
+BTM URL formats: macOS 26 writes `URL:` as a percent-encoded file URL
+(`file:///Applications/My%20App.app/`), macOS 27 as a plain path. Both are
+normalized to the on-disk path before any existence probe (V0.4.1 — before
+that, two installed plug-ins with spaces in their names were reported as
+orphans).
 
 ## Roadmap
 
@@ -258,6 +335,10 @@ report says so honestly instead of retrying into a longer dead wait.
   (no snapshot, no reset), post-dump verification — with the command
   stating in words that the snapshot is an audit artifact, not a backup
   (`sfltool` has no import)
+- **V0.4.1** ✅ — percent-encoded BTM URLs decoded before file probes (fixes
+  two false-positive orphans on macOS 26), honest BTM-timeout message (cold
+  start after an OS upgrade vs. blocked call), warning-free build, release
+  script + installation guide for the multi-device test round
 
 All destructive features keep the rules in the spec: no `/System`
 writes ever, no implicit wildcards, explicit target identity required,

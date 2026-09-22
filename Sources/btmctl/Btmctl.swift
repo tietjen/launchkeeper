@@ -20,9 +20,9 @@ import Foundation
 // `disable` (reversible), never via deletion — that rule is what keeps this
 // tool out of rm-wrapper territory. Dry-run is the DEFAULT: mutation requires
 // --apply. com.apple.* labels and anything under /System are refused by the
-// gate — there is no flag that bypasses it. `sfltool resetbtm` stayed
-// unimplemented on purpose (deferred to V0.4): the BTM database has no
-// backup story, so nothing here may touch it.
+// gate — there is no flag that bypasses it. `sfltool resetbtm` (V0.4b) is
+// guarded the same way — no snapshot, no reset — and says in words that its
+// snapshot is an audit artifact, not a backup: sfltool has no import.
 
 private func runScan(userOnly: Bool, systemOnly: Bool) -> ScanReport {
     var options = ScanOptions()
@@ -427,12 +427,12 @@ struct ResetBtmCommand: ParsableCommand {
         let audit = AuditLog(directory: NSHomeDirectory() + "/Library/Logs/btmctl")
         let outcome = service.run(apply: apply)
 
-        let (status, snapshotPath): (String, String?)
+        let status: String
         switch outcome {
-        case .dryRun: status = "planned"; snapshotPath = nil
-        case .applied: status = "applied-ok"; snapshotPath = nil
-        case .appliedFailed: status = "applied-fail"; snapshotPath = nil
-        case .refused(let r): status = "refused(\(r))"; snapshotPath = nil
+        case .dryRun: status = "planned"
+        case .applied: status = "applied-ok"
+        case .appliedFailed: status = "applied-fail"
+        case .refused(let r): status = "refused(\(r))"
         }
         switch outcome {
         case .applied(_, let after, let snap, _):
@@ -460,7 +460,7 @@ struct ResetBtmCommand: ParsableCommand {
             }
             var before: Int?; var after: Int?; var snap: String?; var notes: [String] = []
             switch outcome {
-            case .dryRun(let b, let s, let n): (before, after, snap, notes) = (b, nil, nil, n)
+            case .dryRun(let b, _, let n): (before, after, snap, notes) = (b, nil, nil, n)
             case .applied(let b, let a, let s, let n): (before, after, snap, notes) = (b, a, s, n)
             case .appliedFailed(_, let b, let s): (before, after, snap, notes) = (b, nil, s, [])
             case .refused(let r): (before, after, snap, notes) = (nil, nil, nil, [r])
@@ -509,7 +509,7 @@ struct Btmctl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "btmctl",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.4).
+        Background-service inventory + app correlation + gated remediation (V0.4.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -518,7 +518,7 @@ struct Btmctl: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.4.0",
+        version: "0.4.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

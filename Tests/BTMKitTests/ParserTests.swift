@@ -126,3 +126,47 @@ final class PlistReaderTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 }
+/// V0.4.1: `URL:` arrives percent-encoded on macOS 26 and as a plain path on
+/// macOS 27. Either way the record must expose the on-disk path — a `%20`
+/// that survives into a file probe is a guaranteed false negative.
+final class BTMURLNormalizationTests: XCTestCase {
+    private func record(url: String, exec: String? = nil) -> BTMRecord {
+        var fields = ["Name": "x", "Type": "app (0x2)", "URL": url]
+        if let exec { fields["Executable Path"] = exec }
+        return BTMRecord(sectionUID: 501, fields: fields)
+    }
+
+    func testPercentEncodedFileURLIsDecoded() {
+        XCTAssertEqual(record(url: "file:///Applications/My%20App.app/").url,
+                       "/Applications/My App.app")
+        XCTAssertEqual(record(url: "file:///Users/j/Library/LaunchAgents/Some%20Vendor%20Agent.plist").url,
+                       "/Users/j/Library/LaunchAgents/Some Vendor Agent.plist")
+    }
+
+    func testRelativeEncodedFragmentIsDecodedButStaysRelative() {
+        XCTAssertEqual(record(url: "Contents/PlugIns/Vendor%20QL%20Extension.appex").url,
+                       "Contents/PlugIns/Vendor QL Extension.appex")
+    }
+
+    func testMacOS27PlainPathIsUnchanged() {
+        XCTAssertEqual(record(url: "/Applications/Vendor.app").url, "/Applications/Vendor.app")
+        XCTAssertEqual(record(url: "Contents/PlugIns/Vendor QL Extension.appex").url,
+                       "Contents/PlugIns/Vendor QL Extension.appex")
+    }
+
+    func testNullAndEmptyStayNil() {
+        XCTAssertNil(record(url: "(null)").url)
+        XCTAssertNil(record(url: "").url)
+    }
+
+    func testExecutablePathIsDecodedAndStillAbsoluteOnly() {
+        XCTAssertEqual(record(url: "x", exec: "/Applications/My%20App.app/Contents/MacOS/helper").executablePath,
+                       "/Applications/My App.app/Contents/MacOS/helper")
+        XCTAssertNil(record(url: "x", exec: "Contents/MacOS/helper").executablePath)
+    }
+
+    func testUndecodableInputIsKeptVerbatim() {
+        // A lone "%" is not a valid escape; the raw path is better than nothing.
+        XCTAssertEqual(record(url: "/tmp/100%").url, "/tmp/100%")
+    }
+}
