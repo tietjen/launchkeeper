@@ -1,4 +1,4 @@
-# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4.1)
+# btmctl — macOS Background Service Inventory + Gated Remediation (V0.4.2)
 
 Read-only CLI for taking stock of what macOS starts in the background:
 LaunchAgents, LaunchDaemons, live `launchd` state, Background Task
@@ -47,9 +47,16 @@ Remediation rules, enforced in code (not docs):
 - **Audit from the first version of writes.** Every operation —
   including refusals and dry-runs — is appended to
   `~/Library/Logs/btmctl/operations.log`.
-- **System scope runs interactively.** System-domain commands go through
-  one `sudo` seam with inherited stdio, so the password prompt is
-  visible. btmctl never asks for blanket sudo and never uses a shell.
+- **System scope runs interactively.** Commands that need root go through
+  one `sudo` seam with inherited stdio *in btmctl's own process group*, so
+  the password prompt is visible, echo is off, and sudo actually receives
+  what you type (V0.4.2 — Foundation's `Process` had put the child into a
+  background process group, which showed the password in clear text and
+  never accepted it). Root is needed only where it is needed: `launchctl`
+  for jobs in the `system` domain, `rm`/`cp` for files under `/Library`.
+  A `/Library/LaunchAgents` agent is a *user-session* job with a
+  root-owned file — btmctl unloads it as you and deletes it via sudo.
+  btmctl never asks for blanket sudo and never uses a shell.
 - **Injection-safe by structure.** Targets resolve from the scan (ids or
   unique name fragments); user input never becomes a shell command, and
   backup names cannot traverse paths.
@@ -75,24 +82,24 @@ download without a login or token).
    from the release page. Prefer `curl` over the browser: files fetched by
    curl carry no quarantine flag, so Gatekeeper never gets involved.
    ```
-   BASE=https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases/download/v0.4.1
-   curl -fsSLO "$BASE/btmctl-v0.4.1-macos-universal.tar.gz"
+   BASE=https://git.dev.paranoidsecurity.de/tj/macos-housecleaning-tool/releases/download/v0.4.2
+   curl -fsSLO "$BASE/btmctl-v0.4.2-macos-universal.tar.gz"
    curl -fsSLO "$BASE/SHA256SUMS"
    ```
    (Copying the tarball over AirDrop, scp or a NAS share works just as well.)
 2. **Verify** the checksum, then unpack:
    ```
    shasum -a 256 -c SHA256SUMS
-   tar -xzf btmctl-v0.4.1-macos-universal.tar.gz
+   tar -xzf btmctl-v0.4.2-macos-universal.tar.gz
    ```
 3. **Install** into your PATH (`/usr/local/bin` needs sudo once):
    ```
-   sudo install -m 755 btmctl-v0.4.1-macos-universal/btmctl /usr/local/bin/btmctl
+   sudo install -m 755 btmctl-v0.4.2-macos-universal/btmctl /usr/local/bin/btmctl
    ```
 4. **Check the signature and run the first scan:**
    ```
    codesign -dv --verbose=2 /usr/local/bin/btmctl   # Authority=Developer ID Application: Jan Tietjen (Y2LTPLFG6D)
-   btmctl --version                                   # 0.4.1
+   btmctl --version                                   # 0.4.2
    btmctl doctor                                      # read-only health check
    ```
    The first `doctor` after a macOS upgrade may report the BTM layer as
@@ -100,12 +107,11 @@ download without a login or token).
 
 **Downloaded with a browser** (Safari, Finder)? The file carries the
 quarantine flag, and Gatekeeper then checks Apple's notarization ticket
-online — the v0.4.1 binary is notarized (submission accepted 2026-09-22),
-so it passes. A bare CLI binary cannot carry a stapled ticket, so an
+online — release binaries are notarized (since v0.4.1), so it passes. A bare CLI binary cannot carry a stapled ticket, so an
 offline first run, or a copy made before the notarization run, may still
 be refused; clear the flag before installing in that case:
 ```
-xattr -d com.apple.quarantine btmctl-v0.4.1-macos-universal/btmctl
+xattr -d com.apple.quarantine btmctl-v0.4.2-macos-universal/btmctl
 ```
 
 **Uninstall:** `sudo rm /usr/local/bin/btmctl`. btmctl keeps its data in
@@ -125,12 +131,12 @@ sudo install -m 755 .build/release/btmctl /usr/local/bin/btmctl
 ### Cutting a release (maintainer)
 
 ```
-scripts/release.sh 0.4.1                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
-scripts/release.sh 0.4.1 --notarize       # + Apple notarization (keychain profile, see script header)
+scripts/release.sh 0.4.2                  # tests, universal build, codesign, dist/*.tar.gz + SHA256SUMS
+scripts/release.sh 0.4.2 --notarize       # + Apple notarization (keychain profile, see script header)
 # Notarize an already-shipped binary later (same bytes → same ticket, no re-release):
-#   tar -xzf dist/btmctl-v0.4.1-macos-universal.tar.gz && ditto -c -k --keepParent btmctl-v0.4.1-macos-universal/btmctl n.zip
+#   tar -xzf dist/btmctl-v0.4.2-macos-universal.tar.gz && ditto -c -k --keepParent btmctl-v0.4.2-macos-universal/btmctl n.zip
 #   xcrun notarytool submit n.zip --keychain-profile SparkMenu --wait
-scripts/release.sh 0.4.1 --upload         # + tag v0.4.1, Gitea release with assets (rbw must be unlocked)
+scripts/release.sh 0.4.2 --upload         # + tag v0.4.2, Gitea release with assets (rbw must be unlocked)
 ```
 
 ## Usage
@@ -160,6 +166,9 @@ btmctl remove <id|name>        # plan: backup snapshot, unload, delete ONE
                                # orphaned launch plist (gated, dry-run)
 btmctl remove <id|name> --apply  # execute — but only after the pre-delete
                                # snapshot is written; verified afterwards
+                               # a job launchd still holds from a plist that is
+                               # already gone is REFUSED here — the refusal names
+                               # the working command (btmctl disable … --apply)
 
 # V0.4 — the BTM database reset (the one non-restorable command)
 btmctl resetbtm                # dry-run: shows the record count, names the
@@ -293,7 +302,7 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 132-test suite includes the V0.2 write
+macOS 26.6.2 without sudo). The 146-test suite includes the V0.2 write
 paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
 not manufacture a gone-verdict" property) and the guarded `resetbtm`
@@ -344,6 +353,12 @@ orphans).
   two false-positive orphans on macOS 26), honest BTM-timeout message (cold
   start after an OS upgrade vs. blocked call), warning-free build, release
   script + installation guide for the multi-device test round
+- **V0.4.2** ✅ — sudo seam via `posix_spawn` in btmctl's own process group
+  (the Foundation `Process` child was a background job: clear-text echo, no
+  input); launchd domain derived from the job, not the plist directory
+  (`/Library/LaunchAgents` agents are `gui/<uid>` jobs, no sudo for
+  `launchctl`, sudo only for the file); 180 s budget for password prompts;
+  `remove` refusals name the working command for jobs whose plist is gone
 
 All destructive features keep the rules in the spec: no `/System`
 writes ever, no implicit wildcards, explicit target identity required,

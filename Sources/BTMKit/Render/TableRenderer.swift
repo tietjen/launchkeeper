@@ -110,7 +110,7 @@ public enum InspectRenderer {
                 + (item.arguments.isEmpty ? "" : " " + item.arguments.joined(separator: " ")))
         }
         if let label = item.label {
-            let domainTarget = item.domain == .user ? "gui/\(uid)" : "system"
+            let domainTarget = RemediationPlanner.domainTarget(for: item, uid: uid)
             lines.append("  launchd:   \(label) (loaded: \(item.loaded), \(domainTarget))")
         }
         if let parent = item.parentApplication {
@@ -141,8 +141,8 @@ public enum InspectRenderer {
         }
 
         lines.append("  next steps (read-only, run these yourself):")
-        if let label = item.label {
-            lines.append("    launchctl print gui/\(uid)/\(label)")
+        if item.label != nil {
+            lines.append("    launchctl print \(RemediationPlanner.displayTarget(for: item, uid: uid))")
         }
         if let path = item.path, path.hasPrefix("/") {
             lines.append("    ls -lO '\(path)'")

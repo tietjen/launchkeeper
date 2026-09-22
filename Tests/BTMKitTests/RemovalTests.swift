@@ -360,8 +360,11 @@ final class RemovalExecutorTests: XCTestCase {
         runner.launchd.services["de.btmctl.ghost"] = 4242
         let executor = RemediationExecutor(runner: runner, uid: 501)
         let item = ghostItem(path: plist, loaded: true, domain: .system)
+        // The temp FakeDaemons dir stands in for a root-owned launch dir:
+        // since V0.4.2 the FILE's directory decides whether rm needs sudo.
         let outcome = executor.execute(
-            RemediationPlanner.plan(operation: .remove, item: item, uid: 501),
+            RemediationPlanner.plan(operation: .remove, item: item, uid: 501,
+                                    systemDirPrefixes: [root + "/FakeDaemons"]),
             operation: .remove, item: item)
 
         XCTAssertEqual(outcome.status, .appliedOk, "actual: \(outcome.status) \(outcome.messages)")
@@ -554,5 +557,40 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertEqual(done.restored, [plist])
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: plist)), original,
                        "undo must restore the EXACT bytes that were deleted")
+    }
+}
+
+// MARK: - V0.4.2: a refusal names the step that DOES help
+
+final class FilelessRemoveRefusalTests: XCTestCase {
+    private let userOnly = ScanOptions(includeUser: true, includeSystem: false,
+                                       scanBTM: false, scanSignatures: false)
+
+    /// The live case (com.example.zombie, 2026-09-22): the app
+    /// uninstalled, plist gone, launchd still holds the job for this login
+    /// session. `remove` has nothing to delete — and must say what helps.
+    func testLoadedJobWithoutFilePointsAtDisable() throws {
+        let root = tempRoot("fileless")
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let home = root + "/home"
+        try makeRemoveFixture(home: home, entries: [])          // empty LaunchAgents
+        let runner = RemovalRunner()
+        runner.launchd.services["com.example.zombie"] = 0        // loaded, no plist anywhere
+        let env = RemediationEnvironment(runner: runner, home: home, uid: 501,
+                                         launchDirs: [home + "/Library/LaunchAgents"],
+                                         backupsRoot: root + "/backups")
+        let engine = RemediationEngine(environment: env, audit: AuditLog(directory: home + "/logs"))
+
+        let result = engine.run(operation: .remove, target: "com.example.zombie",
+                                apply: true, scanOptions: userOnly)
+        guard case .refused(let reason) = result.status else {
+            return XCTFail("expected refusal, got \(result.status)")
+        }
+        XCTAssertTrue(reason.hasPrefix("no backing file — nothing to remove"), reason)
+        XCTAssertTrue(reason.contains("btmctl disable com.example.zombie --apply"),
+                      "refusal must name the working command: \(reason)")
+        XCTAssertTrue(reason.contains("gui/501/com.example.zombie"), reason)
+        XCTAssertFalse(runner.log.contains { $0.contains("rm ") }, "nothing may run: \(runner.log)")
+        XCTAssertTrue(runner.interactiveLog.isEmpty, "nothing may run: \(runner.interactiveLog)")
     }
 }

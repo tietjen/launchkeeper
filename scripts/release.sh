@@ -100,6 +100,7 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
 else
     git tag -a "$TAG" -m "btmctl $TAG"
 fi
+git push origin HEAD          # the release commit itself, not only the tag
 git push origin "$TAG"
 
 echo "==> Gitea release"

@@ -71,14 +71,20 @@ public struct RemediationExecutor {
     public var runner: CommandRunner
     public var uid: Int
     public var fileManager: FileManager
+    /// Budget for a piped step (launchctl, rm): seconds are plenty.
     public var stepTimeout: TimeInterval
+    /// Budget for a step that talks to the user — the sudo password prompt.
+    /// A human is typing (and sudo retries three times on its own); the
+    /// piped 20 s budget cut the prompt off mid-thought (V0.4.2).
+    public var interactiveTimeout: TimeInterval
 
     public init(runner: CommandRunner, uid: Int, fileManager: FileManager = .default,
-                stepTimeout: TimeInterval = 20) {
+                stepTimeout: TimeInterval = 20, interactiveTimeout: TimeInterval = 180) {
         self.runner = runner
         self.uid = uid
         self.fileManager = fileManager
         self.stepTimeout = stepTimeout
+        self.interactiveTimeout = interactiveTimeout
     }
 
     public func execute(_ plan: [PlannedCommand], operation: RemediationOperation,
@@ -93,7 +99,7 @@ public struct RemediationExecutor {
                 // would swallow it. Inherited stdio only.
                 exitCode = runner.runInteractive(command: command.command,
                                                  arguments: command.arguments,
-                                                 timeout: stepTimeout)
+                                                 timeout: interactiveTimeout)
             } else {
                 exitCode = runner.run(command: command.command,
                                       arguments: command.arguments,
@@ -257,7 +263,8 @@ public struct RemediationEngine {
                 }
 
                 let plan = RemediationPlanner.plan(operation: operation, item: item,
-                                                   uid: environment.uid, now: now)
+                                                   uid: environment.uid, now: now,
+                                                   systemDirPrefixes: environment.systemDirPrefixes)
                 guard apply else {
                     if operation == .remove {
                         messages.append("dry-run: a full launch-dir backup would be created first, "
@@ -305,12 +312,27 @@ public struct RemediationEngine {
     /// The file-level remove rules live in RemediationGate.evaluateRemove (one
     /// non-bypassable gate); this adds the runtime precondition on top: the
     /// backing file must actually be there — nothing else may be "cleaned".
+    /// A refusal names the step that DOES help (V0.4.2): a job launchd still
+    /// holds from a plist that is already gone is unloaded by `disable`, and
+    /// a lone BTM record is nothing this tool can or should touch.
     private func removePreflight(_ item: BackgroundItem) -> GateDecision {
+        let hint: String
+        if item.loaded, let label = item.label {
+            let target = RemediationPlanner.displayTarget(for: item, uid: environment.uid)
+            hint = " — launchd still holds the job (\(target)) from a file that no longer "
+                + "exists; it vanishes at the next login, or unload it now: "
+                + "btmctl disable \(label) --apply"
+        } else if item.btmPresent {
+            hint = " — only a Background Task Management record remains; BTM prunes it "
+                + "itself (sfltool has no per-item delete)"
+        } else {
+            hint = ""
+        }
         guard let path = item.path else {
-            return .denied(reason: "no backing file — nothing to remove")
+            return .denied(reason: "no backing file — nothing to remove" + hint)
         }
         guard environment.fileManager.fileExists(atPath: path) else {
-            return .denied(reason: "backing file is not on disk anymore: \(path)")
+            return .denied(reason: "backing file is not on disk anymore: \(path)" + hint)
         }
         return RemediationGate.evaluateRemove(item: item,
                                               fileManager: environment.fileManager,

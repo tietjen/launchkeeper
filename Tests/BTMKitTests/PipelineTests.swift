@@ -278,8 +278,10 @@ final class ListFilterTests: XCTestCase {
 
 final class RendererTests: XCTestCase {
     private func flaggedItem() -> BackgroundItem {
+        // A /Library/LaunchAgents agent: root-owned file, user-session job —
+        // its launchctl target is gui/<uid> (V0.4.2 derives that from the type).
         var item = BackgroundItem(id: "01", key: "de.x.broken", displayName: "broken",
-                                  type: .launchDaemon)
+                                  type: .launchAgentSystem)
         item.domain = .user
         item.label = "de.x.broken"
         item.path = "/Library/LaunchAgents/de.x.broken.plist"

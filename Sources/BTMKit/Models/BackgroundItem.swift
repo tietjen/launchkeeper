@@ -150,3 +150,35 @@ public struct SourceEvidence: Codable, Equatable {
         self.confidence = confidence
     }
 }
+
+/// The launchd domain a job lives in — what `launchctl` targets take.
+public enum LaunchdDomainKind: String, Codable {
+    case gui, system
+}
+
+extension BackgroundItem {
+    /// Where the JOB runs, as opposed to `domain`, which records where the
+    /// EVIDENCE came from. Ground truth is the live launchd read (the
+    /// `launchd-state` metadata names the domain the job was printed from).
+    /// Without it the plist kind decides: agents — in ~/Library or in
+    /// /Library — run in the user's gui domain, daemons in system.
+    ///
+    /// The distinction matters: a /Library/LaunchAgents agent is `mixed`
+    /// (root-owned file, user-session job). V0.4.1 planned it as
+    /// `system/<label>` via sudo — a target that did not exist and a
+    /// password prompt nobody needed (V0.4.2).
+    public var launchdDomainKind: LaunchdDomainKind {
+        if let state = metadata["launchd-state"] {
+            if state.hasPrefix("gui") { return .gui }
+            if state.hasPrefix("system") { return .system }
+        }
+        switch type {
+        case .launchAgentUser, .launchAgentSystem, .loginItem, .smappservice:
+            return .gui
+        case .launchDaemon:
+            return .system
+        case .btmEntry, .helper, .script, .unknown:
+            return domain == .system ? .system : .gui
+        }
+    }
+}

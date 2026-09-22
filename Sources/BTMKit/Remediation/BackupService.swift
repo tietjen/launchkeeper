@@ -23,7 +23,7 @@ public struct BackupEnvironment {
     public init(launchDirs: [String]? = nil, systemDirPrefixes: [String]? = nil,
                 backupsRoot: String? = nil, runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default, home: String = NSHomeDirectory(),
-                uid: Int = -1, toolVersion: String = "0.4.1") {
+                uid: Int = -1, toolVersion: String = "0.4.2") {
         self.launchDirs = launchDirs ?? [
             home + "/Library/LaunchAgents", home + "/Library/LaunchDaemons",
             "/Library/LaunchAgents", "/Library/LaunchDaemons",
@@ -255,7 +255,7 @@ public struct BackupService {
             if env.systemDirPrefixes.contains(where: { entry.target.hasPrefix($0 + "/") }) {
                 let code = env.runner.runInteractive(command: "/usr/bin/sudo",
                                                       arguments: ["cp", staged, entry.target],
-                                                      timeout: 20)
+                                                      timeout: 180)   // a human types the password
                 if code != 0 {
                     report.failed.append("\(entry.target) — sudo cp exit \(code)")
                     continue

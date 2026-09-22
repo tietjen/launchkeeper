@@ -672,3 +672,93 @@ final class BackupServiceTests: XCTestCase {
         XCTAssertTrue(error.message.contains("no such backup"))
     }
 }
+// MARK: - V0.4.2: the launchd domain is where the JOB runs, not where the plist lives
+
+final class LaunchdDomainKindTests: XCTestCase {
+    private func item(type: ItemType = .unknown, domain: ItemDomain = .mixed,
+                      launchdState: String? = nil) -> BackgroundItem {
+        var item = BackgroundItem(key: "k", displayName: "k", type: type, label: "k", domain: domain)
+        if let launchdState { item.metadata["launchd-state"] = launchdState }
+        return item
+    }
+
+    func testLiveLaunchdEvidenceWins() {
+        XCTAssertEqual(item(type: .launchDaemon, domain: .system, launchdState: "gui -").launchdDomainKind, .gui)
+        XCTAssertEqual(item(type: .launchAgentUser, domain: .user, launchdState: "system (pe)").launchdDomainKind, .system)
+    }
+
+    func testLibraryLaunchAgentIsAGuiJob() {
+        // /Library/LaunchAgents: root-owned FILE, user-session JOB. The
+        // correlator marks it `mixed`; the job still runs in gui/<uid>.
+        XCTAssertEqual(item(type: .launchAgentSystem, domain: .mixed).launchdDomainKind, .gui)
+        XCTAssertEqual(item(type: .launchAgentSystem, domain: .system).launchdDomainKind, .gui)
+    }
+
+    func testDaemonsAndFallbacks() {
+        XCTAssertEqual(item(type: .launchDaemon, domain: .system).launchdDomainKind, .system)
+        XCTAssertEqual(item(type: .unknown, domain: .system).launchdDomainKind, .system)
+        XCTAssertEqual(item(type: .unknown, domain: .user).launchdDomainKind, .gui)
+        XCTAssertEqual(item(type: .loginItem, domain: .user).launchdDomainKind, .gui)
+    }
+}
+
+final class LibraryLaunchAgentPlannerTests: XCTestCase {
+    /// The live shape from 2026-09-22: Vendor leftovers in /Library/LaunchAgents,
+    /// loaded in gui/501. V0.4.1 planned `sudo launchctl disable system/<label>`
+    /// — a target that did not exist AND a password prompt nobody needed.
+    private func citrix(loaded: Bool = true, enabled: Bool = true) -> BackgroundItem {
+        var item = BackgroundItem(key: "com.example.vendoragent", displayName: "com.example.vendoragent",
+                                  type: .launchAgentSystem,
+                                  path: "/Library/LaunchAgents/com.example.vendoragent.plist",
+                                  label: "com.example.vendoragent",
+                                  executable: "/Applications/Vendor Workspace.app/Contents/MacOS/vendoragent",
+                                  domain: .mixed, loaded: loaded, enabled: enabled, orphaned: true)
+        if loaded { item.metadata["launchd-state"] = "gui -" }
+        return item
+    }
+
+    func testDisableTargetsGuiDomainWithoutSudo() {
+        let plan = RemediationPlanner.plan(operation: .disable, item: citrix(), uid: 501)
+        XCTAssertEqual(plan.map(\.display), [
+            "/bin/launchctl disable gui/501/com.example.vendoragent",
+            "/bin/launchctl bootout gui/501/com.example.vendoragent",
+        ])
+    }
+
+    func testEnableNowBootstrapsIntoGuiDomain() {
+        let plan = RemediationPlanner.plan(operation: .enable, item: citrix(loaded: false, enabled: false),
+                                           uid: 501, now: true)
+        XCTAssertEqual(plan.map(\.display), [
+            "/bin/launchctl enable gui/501/com.example.vendoragent",
+            "/bin/launchctl bootstrap gui/501 /Library/LaunchAgents/com.example.vendoragent.plist",
+        ])
+    }
+
+    func testRemoveUnloadsAsUserButDeletesViaSudo() {
+        // Two sudo decisions: launchctl by domain (gui → no sudo), the file
+        // by directory (/Library → root-owned → sudo rm).
+        let plan = RemediationPlanner.plan(operation: .remove, item: citrix(), uid: 501)
+        XCTAssertEqual(plan.map(\.display), [
+            "/bin/launchctl bootout gui/501/com.example.vendoragent",
+            "/usr/bin/sudo rm -- /Library/LaunchAgents/com.example.vendoragent.plist",
+        ])
+    }
+
+    func testDisplayTargetFollowsTheJobDomain() {
+        XCTAssertEqual(RemediationPlanner.displayTarget(for: citrix(), uid: 501),
+                       "gui/501/com.example.vendoragent")
+    }
+
+    func testExecutorVerifiesInTheGuiDomain() {
+        let fake = FakeLaunchd()
+        fake.services["com.example.vendoragent"] = 0
+        let executor = RemediationExecutor(runner: fake, uid: 501)
+        let item = citrix()
+        let outcome = executor.execute(RemediationPlanner.plan(operation: .disable, item: item, uid: 501),
+                                       operation: .disable, item: item)
+        XCTAssertEqual(outcome.status, .appliedOk)
+        XCTAssertFalse(fake.log.contains { $0.contains("sudo") }, "gui job: no sudo — \(fake.log)")
+        XCTAssertTrue(fake.log.contains("/bin/launchctl print-disabled gui/501"),
+                      "verify must read the gui domain: \(fake.log)")
+    }
+}
