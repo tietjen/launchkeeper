@@ -69,6 +69,23 @@ public struct OrphanDetector {
                 }
             }
 
+            // 7. (V0.5.5) A privileged helper no LaunchDaemon points at: nothing
+            // can start it — the leftover of an uninstalled app.
+            if item.type == .privilegedHelper, !item.launchdPresent, !item.plistPresent {
+                reasons.append("privileged helper without a LaunchDaemon — nothing can start it "
+                    + "(leftover of an uninstalled app)")
+                raise(.medium)
+            }
+
+            // 8. (V0.5.5) A system extension whose host app is nowhere: it
+            // outlives its app (no app in /Applications ships it, Spotlight
+            // knows none).
+            if item.type == .systemExtension, item.metadata["sysext-host-app"] == "not found" {
+                reasons.append("host app not found — no app ships \(item.bundleIdentifier ?? item.displayName) "
+                    + "and Spotlight knows none; the extension outlives its app")
+                raise(.medium)
+            }
+
             // 6. (V0.4.4) BTM leftover: the record is all that is left — no
             // plist on disk, no launchd job. Not a broken component but the
             // trail of one already removed. `remove` has nothing to delete and

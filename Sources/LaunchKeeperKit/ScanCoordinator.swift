@@ -14,13 +14,20 @@ public struct ScanOptions: Sendable {
     /// App extensions via `pluginkit -mAvv` (V0.5.4). Contributes items, so
     /// a failure marks the inventory incomplete.
     public var scanExtensions: Bool
+    /// System extensions + kexts (systemextensionsctl, kmutil, /Library/Extensions) (V0.5.5).
+    public var scanSystemExtensions: Bool
+    /// /Library/PrivilegedHelperTools with embedded Info.plists (V0.5.5).
+    public var scanHelpers: Bool
     public init(includeUser: Bool = true, includeSystem: Bool = true,
-                scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true) {
+                scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true,
+                scanSystemExtensions: Bool = true, scanHelpers: Bool = true) {
         self.includeUser = includeUser
         self.includeSystem = includeSystem
         self.scanBTM = scanBTM
         self.scanSignatures = scanSignatures
         self.scanExtensions = scanExtensions
+        self.scanSystemExtensions = scanSystemExtensions
+        self.scanHelpers = scanHelpers
     }
 }
 
@@ -194,6 +201,32 @@ public struct ScanCoordinator {
         } else {
             checks.append("pluginkit: skipped")
         }
+
+        // ---- Stage 3c: system extensions + kexts. Contribute items.
+        var systemExtensions: [SystemExtensionRecord] = []
+        var kexts: [KernelExtensionRecord] = []
+        if options.scanSystemExtensions {
+            let result = SystemExtensionScanner(runner: env.runner, fileManager: env.fileManager, home: env.home).scan()
+            systemExtensions = result.extensions
+            kexts = result.kexts
+            checks.append(contentsOf: result.checks)
+            warnings.append(contentsOf: result.warnings)
+            incomplete.append(contentsOf: result.failed)
+        } else {
+            checks.append("system extensions: skipped")
+        }
+
+        // ---- Stage 3d: privileged helper tools. Contribute items.
+        var helpers: [PrivilegedHelperRecord] = []
+        if options.scanHelpers {
+            let result = PrivilegedHelperScanner(runner: env.runner, fileManager: env.fileManager).scan()
+            helpers = result.helpers
+            checks.append(contentsOf: result.checks)
+            warnings.append(contentsOf: result.warnings)
+            incomplete.append(contentsOf: result.failed)
+        } else {
+            checks.append("privileged helpers: skipped")
+        }
         if !incomplete.isEmpty {
             warnings.append("inventory incomplete (\(incomplete.joined(separator: ", "))) — display "
                 + "ids are positional per scan and will not match a complete run: address "
@@ -204,14 +237,18 @@ public struct ScanCoordinator {
         let correlator = ItemCorrelator(fileManager: env.fileManager)
         let (items, uncorrelated) = correlator.correlate(ItemCorrelator.Input(
             jobs: jobs, launchd: launchd, btm: btm, disabled: disabled, uid: env.uid,
-            extensions: extensions))
+            extensions: extensions, systemExtensions: systemExtensions, kexts: kexts, helpers: helpers))
 
         // ---- Stage 5: signatures (enrichment).
         var enriched = items
         if options.scanSignatures {
             let signatures = SignatureScanner()
             for index in enriched.indices {
-                guard let exec = enriched[index].executable, !exec.isEmpty else { continue }
+                // Bundles (system extensions, kexts) are signed as a whole:
+                // codesign takes the bundle path.
+                let item = enriched[index]
+                let bundle = (item.type == .systemExtension || item.type == .kernelExtension) ? item.path : nil
+                guard let exec = item.executable ?? bundle, !exec.isEmpty else { continue }
                 let record = signatures.status(for: exec, runner: env.runner)
                 enriched[index].codeSignatureStatus = record.status
                 enriched[index].sources.append(SourceEvidence(

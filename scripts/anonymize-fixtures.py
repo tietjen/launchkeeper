@@ -27,7 +27,8 @@ import json, pathlib, re, random, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Tests" / "Fixtures"
 REAL = ROOT / "real"
-FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt", "pluginkit.txt"]
+FILES = ["dumpbtm-nosudo.txt", "launchctl-gui.txt", "launchctl-system.txt", "disabled-gui.txt", "pluginkit.txt",
+         "systemextensionsctl.txt"]
 
 # Anchors the tests reference by name get fixed, readable pseudonyms. The
 # mapping itself names real identifiers, so it lives next to the real
@@ -170,9 +171,23 @@ def main(report=False):
             return f.group(1) + f.group(2) + " = " + region(f.group(3))
         return UUID.sub(map_uuid, line)
 
+    # systemextensionsctl list: "--- com.apple.system_extension.<kind> (...)" section
+    # headers and tab-separated rows "enabled\tactive\tteamID\tbundleID (version)\tname\t[state]".
+    # Team ID, bundle id and name are regions; flags, version and state are format.
+    def sysext_line(line):
+        if line.startswith("---") or line.startswith("enabled\t") or "\t" not in line:
+            return line
+        cols = line.split("\t")
+        if len(cols) >= 5:
+            cols[2] = TEAM.sub(map_team, cols[2])
+            bid, sep, ver = cols[3].partition(" (")
+            cols[3] = region(bid) + sep + ver
+            cols[4] = region(cols[4])
+        return "\t".join(cols)
+
     handlers = {"dumpbtm-nosudo.txt": btm_line, "launchctl-gui.txt": launchctl_line,
                 "launchctl-system.txt": launchctl_line, "disabled-gui.txt": disabled_line,
-                "pluginkit.txt": pluginkit_line}
+                "pluginkit.txt": pluginkit_line, "systemextensionsctl.txt": sysext_line}
     for f, t in texts.items():
         h = handlers[f]
         (ROOT / f).write_text("\n".join(h(line) for line in t.split("\n")))

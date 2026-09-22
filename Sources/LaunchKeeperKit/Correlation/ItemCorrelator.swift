@@ -14,11 +14,18 @@ public struct ItemCorrelator {
         public var uid: Int
         /// V0.5.4: app extensions from `pluginkit -mAvv`.
         public var extensions: [AppExtensionRecord]
+        /// V0.5.5: system extensions, kexts, privileged helper tools.
+        public var systemExtensions: [SystemExtensionRecord]
+        public var kexts: [KernelExtensionRecord]
+        public var helpers: [PrivilegedHelperRecord]
         public init(jobs: [LaunchJobRecord], launchd: [LaunchdServiceRecord],
                     btm: [BTMRecord], disabled: [String: Bool], uid: Int,
-                    extensions: [AppExtensionRecord] = []) {
+                    extensions: [AppExtensionRecord] = [],
+                    systemExtensions: [SystemExtensionRecord] = [], kexts: [KernelExtensionRecord] = [],
+                    helpers: [PrivilegedHelperRecord] = []) {
             self.jobs = jobs; self.launchd = launchd; self.btm = btm
             self.disabled = disabled; self.uid = uid; self.extensions = extensions
+            self.systemExtensions = systemExtensions; self.kexts = kexts; self.helpers = helpers
         }
     }
 
@@ -270,6 +277,103 @@ public struct ItemCorrelator {
                 confidence: .high))
             accum[key!] = item
             extensionKeys[ext.identifier] = key!
+        }
+
+        // ---- Pass 5: system extensions + kernel extensions. Nothing else
+        // describes them; they are their own items in the system domain.
+        for ext in input.systemExtensions {
+            let key = "sysext:" + ext.bundleIdentifier
+            var item = BackgroundItem(key: key, displayName: ext.bundleIdentifier, type: .systemExtension,
+                                      path: ext.installedPath, owner: "root", uid: 0, domain: .system,
+                                      bundleIdentifier: ext.bundleIdentifier, teamIdentifier: ext.teamIdentifier,
+                                      loaded: ext.active, running: ext.active, enabled: ext.enabled,
+                                      category: .systemExtensions)
+            item.metadata["sysext-kind"] = ext.kind
+            item.metadata["sysext-state"] = ext.state
+            item.metadata["sysext-name"] = ext.name
+            if let version = ext.version { item.metadata["sysext-version"] = version }
+            if let pane = ext.pane { item.metadata["sysext-pane"] = pane }
+            if let host = ext.hostAppPath {
+                item.parentApplication = ((host as NSString).lastPathComponent as NSString).deletingPathExtension
+                item.appPresent = true
+                item.metadata["sysext-host-app"] = host
+            } else {
+                item.metadata["sysext-host-app"] = "not found"
+            }
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(
+                kind: .systemExtension,
+                detail: "systemextensionsctl: \(ext.bundleIdentifier) [\(ext.kind)] \(ext.state)", confidence: .high))
+            accum[key] = item
+        }
+        for kext in input.kexts {
+            let key = "kext:" + kext.bundleIdentifier
+            var item = BackgroundItem(key: key, displayName: kext.bundleIdentifier, type: .kernelExtension,
+                                      path: kext.path, owner: "root", uid: 0, domain: .system,
+                                      bundleIdentifier: kext.bundleIdentifier,
+                                      loaded: kext.loaded, running: kext.loaded, enabled: true,
+                                      category: .systemExtensions)
+            if let version = kext.version { item.metadata["kext-version"] = version }
+            item.metadata["kext-loaded"] = kext.loaded ? "true" : "false"
+            markDomain(&item, false)
+            item.sources.append(SourceEvidence(
+                kind: .systemExtension,
+                detail: "kext: \(kext.bundleIdentifier)" + (kext.loaded ? " loaded" : " installed, not loaded"),
+                confidence: .high))
+            accum[key] = item
+        }
+
+        // ---- Pass 6: privileged helper tools. The SMJobBless daemon's plist
+        // names the helper binary as Program — that item becomes the helper's
+        // item. A helper no daemon points at is its own item, and a leftover:
+        // nothing can start it.
+        for helper in input.helpers {
+            let canonical = PathUtils.canonicalize(helper.path, fileManager: fileManager)
+            let match = accum.first { entry in
+                entry.value.executable.map { PathUtils.canonicalize($0, fileManager: fileManager) == canonical } == true
+            }
+            let key: String
+            var item: BackgroundItem
+            if let match {
+                key = match.key
+                item = match.value
+            } else {
+                key = "helper:" + helper.name
+                item = BackgroundItem(key: key, displayName: helper.name, type: .privilegedHelper,
+                                      path: helper.path, executable: helper.path, owner: "root", uid: 0,
+                                      domain: .system, enabled: true, category: .privilegedHelpers)
+                markDomain(&item, false)
+            }
+            item.category = .privilegedHelpers
+            if item.bundleIdentifier == nil { item.bundleIdentifier = helper.bundleIdentifier }
+            if let version = helper.version { item.metadata["helper-version"] = version }
+            item.metadata["helper-path"] = helper.path
+            if !helper.authorizedClients.isEmpty {
+                item.metadata["helper-clients"] = helper.authorizedClients.joined(separator: ", ")
+            }
+            if !helper.hasInfoPlist { item.metadata["helper-info-plist"] = "missing" }
+            if let client = helper.authorizedClients.first {
+                if let app = helper.clientAppPath {
+                    if item.parentApplication == nil {
+                        item.parentApplication = ((app as NSString).lastPathComponent as NSString).deletingPathExtension
+                    }
+                    item.appPresent = true
+                    item.metadata["helper-client-app"] = app
+                } else {
+                    // A Spotlight miss is not evidence: it does not index
+                    // /Library/Application Support, and clients are often
+                    // nested bundles (an uninstaller inside the app). The
+                    // client is named for display; appPresent stays as it was.
+                    if item.parentApplication == nil { item.parentApplication = client }
+                    item.metadata["helper-client-app"] = "not found via Spotlight"
+                }
+            }
+            item.sources.append(SourceEvidence(
+                kind: .helperTool,
+                detail: "helper: \(helper.path)"
+                    + (helper.authorizedClients.isEmpty ? "" : " clients: " + helper.authorizedClients.joined(separator: ", ")),
+                confidence: .high))
+            accum[key] = item
         }
 
         // ---- Finalize: domain derivation + deterministic ids.

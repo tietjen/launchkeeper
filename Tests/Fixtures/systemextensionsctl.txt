@@ -1,0 +1,10 @@
+3 extension(s)
+--- com.apple.system_extension.network_extension (Go to 'System Settings > General > Login Items & Extensions > Network Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+	*	TEAM000033	com.kasponnu.lumsol.gantutel (4.3.1/4.3.1)	Vapa	[activated waiting for user]
+--- com.apple.system_extension.driver_extension (Go to 'System Settings > General > Login Items & Extensions > Driver Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	TEAM000034	cn.kalum.Soltume (1.0/1)	cn.kalum.Soltume	[activated enabled]
+--- com.apple.system_extension.cmio (Go to 'System Settings > General > Login Items & Extensions > Camera Extensions' to modify these system extension(s))
+enabled	active	teamID	bundleID (version)	name	[state]
+*	*	TEAM000035	lumsol.Numirlum.Baridri (1.7/7)	Baridri	[activated enabled]

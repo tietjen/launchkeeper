@@ -127,6 +127,9 @@ public enum ItemType: String, Codable {
     case smappservice = "smappservice"
     case btmEntry = "btm-entry"
     case appExtension = "app-extension"
+    case systemExtension = "system-extension"
+    case kernelExtension = "kernel-extension"
+    case privilegedHelper = "privileged-helper"
     case helper
     case script
     case unknown
@@ -150,6 +153,8 @@ public enum EvidenceKind: String, Codable {
     case btm
     case signature
     case pluginkit
+    case systemExtension = "system-extension"
+    case helperTool = "helper-tool"
 }
 
 public struct SourceEvidence: Codable, Equatable {
@@ -188,7 +193,7 @@ extension BackgroundItem {
         switch type {
         case .launchAgentUser, .launchAgentSystem, .loginItem, .smappservice:
             return .gui
-        case .launchDaemon:
+        case .launchDaemon, .systemExtension, .kernelExtension, .privilegedHelper:
             return .system
         case .btmEntry, .appExtension, .helper, .script, .unknown:
             return domain == .system ? .system : .gui

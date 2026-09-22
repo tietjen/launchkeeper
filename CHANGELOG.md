@@ -5,7 +5,31 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.4
+## [Unreleased] — 0.5.5
+
+### Added
+- System extensions: `systemextensionsctl list` is a scan source. Network,
+  endpoint-security, DriverKit and camera extensions become items of
+  category `system-extensions` with enabled/active bits, state, team ID,
+  version, the owning System Settings pane, the installed copy under
+  `/Library/SystemExtensions` and the host app that ships it. A host app
+  that is nowhere (not in `/Applications`, unknown to Spotlight) makes the
+  extension an orphan of medium confidence. Kernel extensions from `kmutil
+  showloaded` (third-party only) and `/Library/Extensions` join the same
+  category. Both are display-only; the control text names the
+  `systemextensionsctl uninstall` route. Bundles are code-signature checked.
+- Privileged helper tools: `/Library/PrivilegedHelperTools` is a scan
+  source. Each helper's embedded Info.plist (`launchctl plist
+  __TEXT,__info_plist`) yields bundle id, version and `SMAuthorizedClients`;
+  the helper merges with the LaunchDaemon whose `Program` points at it
+  (category `privileged-helpers`, launchd control kept) or, without one,
+  becomes its own item and an orphan of medium confidence — nothing can
+  start it. The client app is resolved via Spotlight for display; a miss
+  is not treated as evidence. Failed `systemextensionsctl`, `kmutil` or an
+  unreadable helper directory mark the inventory incomplete. Anonymized
+  fixture and 12 tests.
+
+## [0.5.4] — 2026-09-22
 
 ### Added
 - App extensions: `pluginkit -mAvv` is a scan source. Every registered

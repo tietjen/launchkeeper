@@ -20,6 +20,26 @@ public struct ControlAnalyzer {
     }
 
     public func evaluate(_ item: BackgroundItem) -> Controllability {
+        // System extensions, kexts and helpers without a launchd job (V0.5.5):
+        // what launchkeeper can do is show them and say where the switch is.
+        switch item.type {
+        case .systemExtension:
+            let target = [item.teamIdentifier, item.bundleIdentifier].compactMap { $0 }.joined(separator: " ")
+            let pane = item.metadata["sysext-pane"] ?? "Extensions"
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "system extension — deactivate via its host app or `systemextensionsctl uninstall "
+                    + "\(target)` (SIP rules apply); System Settings › General › Login Items & Extensions › \(pane)")
+        case .kernelExtension:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "kernel extension — unload/remove via the vendor's uninstaller; on Apple silicon "
+                    + "third-party kexts need Reduced Security")
+        case .privilegedHelper where !item.launchdPresent && !item.plistPresent:
+            return Controllability(level: .displayOnly, actions: [],
+                reason: "privileged helper without a launchd job — nothing to disable; deleting helper "
+                    + "binaries comes with V0.8 cleanup")
+        default:
+            break
+        }
         // App extensions: the user election lives in pluginkit; launchkeeper
         // shows it and (until V0.7) stops there.
         if item.sources.contains(where: { $0.kind == .pluginkit }) {

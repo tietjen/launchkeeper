@@ -140,7 +140,8 @@ final class AppExtensionScanStageTests: XCTestCase {
     }
 
     private let options = ScanOptions(includeUser: true, includeSystem: false, scanBTM: false,
-                                      scanSignatures: false, scanExtensions: true)
+                                      scanSignatures: false, scanExtensions: true,
+                                      scanSystemExtensions: false, scanHelpers: false)
 
     func testExtensionsBecomeItemsWithControlAndCategory() throws {
         let home = try home()

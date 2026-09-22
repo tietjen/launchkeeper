@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.4)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.5)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -181,6 +181,10 @@ launchkeeper doctor --json           # machine-readable health report
 launchkeeper list --category <name>  # one category: launch-items, login-items, app-extensions, …
 launchkeeper list --category app-extensions   # pluginkit: QuickLook, Share, Widgets, Finder Sync, …
                                      # with the user election (use / ignore / none) and the host app
+launchkeeper list --category system-extensions  # systemextensionsctl + kexts: network filters, drivers,
+                                     # camera extensions, legacy kernel extensions — state and host app
+launchkeeper list --category privileged-helpers # /Library/PrivilegedHelperTools: SMJobBless helpers with
+                                     # their LaunchDaemon and authorized client apps; leftovers flagged
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -287,7 +291,8 @@ failed, it says so instead of pretending the inventory is complete.
 Every item carries three more dimensions, visible in `inspect` and `--json`:
 
 - **category** — the Autoruns-style tab it belongs to (`launch-items`,
-  `login-items`, `app-extensions`; more scanners follow in V0.5.x).
+  `login-items`, `app-extensions`, `system-extensions`,
+  `privileged-helpers`; more scanners follow in V0.5.x).
   `list --category <name>` filters by it.
 - **control** — what launchkeeper can do with it, computed from the *same*
   gate the mutating commands consult: `reversible` (disable/enable),
@@ -334,12 +339,46 @@ The election itself is read-only here (`pluginkit -e use|ignore -i <id>`);
 launchkeeper control follows in V0.7. A failed `pluginkit` call marks the
 inventory incomplete, like a failed BTM dump.
 
+## System extensions, kexts, privileged helpers (V0.5.5)
+
+`systemextensionsctl list` is the source for **system extensions** — network
+filters and VPNs, endpoint security agents, DriverKit drivers, camera
+(CMIO) extensions — with their enabled/active bits, state (`[activated
+enabled]`, `[activated waiting for user]`, …), team ID, version and the
+System Settings pane that owns the switch. launchkeeper locates the
+installed copy under `/Library/SystemExtensions/<uuid>/` and the host app
+that ships it (`<App>.app/Contents/Library/SystemExtensions/`, then
+Spotlight). Apple requires that app to live in `/Applications`, so a
+missing host app is a real signal: the extension outlives its app and is
+flagged as an orphan (medium confidence). **Kernel extensions** come from
+`kmutil showloaded` (third-party only) plus the bundles installed in
+`/Library/Extensions`; both are category `system-extensions`, signed as
+bundles, display-only: the control text names the `systemextensionsctl
+uninstall <teamID> <bundleID>` route and the pane.
+
+`/Library/PrivilegedHelperTools` holds the **SMJobBless helpers** — root
+daemons that apps install to do privileged work. Each helper's embedded
+Info.plist (`launchctl plist __TEXT,__info_plist <binary>`) names its
+`SMAuthorizedClients`; launchkeeper merges the helper with the LaunchDaemon
+whose `Program` points at it (category `privileged-helpers`, the daemon
+keeps its launchd control) and resolves the client app via Spotlight. A
+helper no LaunchDaemon points at is its own item and an orphan: nothing can
+start it — the leftover of an uninstalled app (medium confidence,
+display-only until V0.8 cleanup). A Spotlight miss on the client app is
+*not* evidence — Spotlight does not index `/Library/Application Support`
+and clients are often nested bundles — so the client is named for display
+and nothing more. Helpers without an embedded Info.plist (some vendors skip
+it) are listed with the fact.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
     launchctl print (live)   ──┤→ Correlation ──→ Orphan + Risk analysis
     sfltool dumpbtm (BTM)    ──┤     ↓                    ↓
     pluginkit -mAvv          ──┤
+    systemextensionsctl list ──┤
+    kmutil + /Library/Extensions┤
+    PrivilegedHelperTools    ──┤
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
     .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
                                      Spotlight confirmation)
@@ -461,6 +500,11 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.5** ✅ — system extensions (`systemextensionsctl list`), kernel
+  extensions (`kmutil showloaded` + `/Library/Extensions`) and privileged
+  helper tools (`/Library/PrivilegedHelperTools` + embedded Info.plist) as
+  categories `system-extensions` / `privileged-helpers`; helpers merge
+  with their LaunchDaemon, a host app or daemon that is gone is an orphan
 - **V0.5.4** ✅ — app extensions via `pluginkit -mAvv` as category
   `app-extensions`, merged with the BTM extension records by bundle path,
   election and extension point on every item, incomplete-marking on failure

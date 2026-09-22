@@ -1,8 +1,9 @@
 # Fixtures
 
-The four `*.txt` files are **anonymized captures** of a real macOS 26.6.2 system
+The `*.txt` files are **anonymized captures** of a real macOS 26.6.2 system
 (`sfltool dumpbtm`, `launchctl print gui/501`, `launchctl print system`,
-`launchctl print-disabled gui/501`, all taken without sudo). They keep every
+`launchctl print-disabled gui/501`, `pluginkit -mAvv`,
+`systemextensionsctl list`, all taken without sudo). They keep every
 structural quirk the parsers are tested against and replace everything that
 identifies the machine: non-Apple identifiers become deterministic pseudo-words
 (consistently across all files, so labels, plist URLs, BTM identifiers and

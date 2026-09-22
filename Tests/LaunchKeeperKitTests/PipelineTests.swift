@@ -107,7 +107,7 @@ final class ScanPipelineTests: XCTestCase {
     """
 
     private func userOnlyOptions() -> ScanOptions {
-        ScanOptions(includeUser: true, includeSystem: false, scanBTM: true, scanSignatures: false, scanExtensions: false)
+        ScanOptions(includeUser: true, includeSystem: false, scanBTM: true, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false)
     }
 
     func testHappyPathMergesAcrossLayers() throws {
