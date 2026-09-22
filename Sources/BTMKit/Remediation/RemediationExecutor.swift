@@ -199,16 +199,22 @@ public struct RemediationEngine {
         self.audit = audit ?? AuditLog(directory: environment.home + "/Library/Logs/btmctl")
     }
 
+    /// The scan every remediation resolves against: the SAME item set `list`
+    /// prints. Display ids are positional per scan run, so a scan with fewer
+    /// items renumbers everything — until V0.4.3 the BTM layer was skipped
+    /// here, and `remove 54` could hit a different entry than `list` had shown
+    /// as 54. BTM-only leftovers also resolve now and get an honest refusal
+    /// instead of "no match". Signatures stay off: they never change the set.
+    public static let defaultScanOptions = ScanOptions(includeUser: true, includeSystem: true,
+                                                       scanBTM: true, scanSignatures: false)
+
     /// `scanOptions` is injectable so tests can keep the scan hermetic
-    /// (user-domain only, no real system reads). Defaults to a full two-domain
-    /// read without BTM/signature layers.
+    /// (user-domain only, no real system reads).
     public func run(operation: RemediationOperation, target needle: String,
                     apply: Bool, now: Bool = false,
-                    scanOptions: ScanOptions = ScanOptions(includeUser: true, includeSystem: true,
-                                                           scanBTM: false, scanSignatures: false)) -> RemediationResult {
+                    scanOptions: ScanOptions = RemediationEngine.defaultScanOptions) -> RemediationResult {
         // Remediation READS the scan (target resolution needs live loaded/enabled
-        // state) but never extends it: BTM and signature layers stay unscanned
-        // here — they add seconds and no decision value for a gate.
+        // state and the full id space) but never extends it.
         let scanEnv = ScanEnvironment(runner: environment.runner,
                                       fileManager: environment.fileManager,
                                       home: environment.home, uid: environment.uid)

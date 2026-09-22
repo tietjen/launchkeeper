@@ -762,3 +762,109 @@ final class LibraryLaunchAgentPlannerTests: XCTestCase {
                       "verify must read the gui domain: \(fake.log)")
     }
 }
+
+// MARK: - V0.4.3: BTM-only leftovers, and id consistency between list and remediation
+
+final class BTMOnlyGateTests: XCTestCase {
+    private func btmOnly(enabled: Bool) -> BackgroundItem {
+        var item = BackgroundItem(key: "btm:16.com.example.gone", displayName: "GoneHelper", type: .btmEntry,
+                                  path: "/Library/LaunchAgents/com.example.gone.plist", label: "com.example.gone",
+                                  executable: "/Applications/Gone.app/Contents/MacOS/gone",
+                                  domain: .user, enabled: enabled)
+        item.btmPresent = true
+        return item
+    }
+
+    func testDisableAndRemoveAreRefused() {
+        for operation in [RemediationOperation.disable, .remove] {
+            let decision = RemediationGate.evaluate(operation: operation, item: btmOnly(enabled: true))
+            guard case .denied(let reason) = decision, reason.contains("Background Task Management") else {
+                return XCTFail("expected BTM-only refusal for \(operation), got \(decision)")
+            }
+        }
+    }
+
+    func testEnableMayDropADanglingOverride() {
+        XCTAssertEqual(RemediationGate.evaluate(operation: .enable, item: btmOnly(enabled: false)), .allowed)
+    }
+
+    func testEnableWithoutOverrideIsRefused() {
+        guard case .denied = RemediationGate.evaluate(operation: .enable, item: btmOnly(enabled: true)) else {
+            return XCTFail("nothing to enable on a BTM-only record without an override")
+        }
+    }
+
+    func testPlistBackedItemIsUnaffected() {
+        var item = btmOnly(enabled: true)
+        item.plistPresent = true
+        XCTAssertEqual(RemediationGate.evaluate(operation: .disable, item: item), .allowed)
+    }
+}
+
+final class RemediationIdConsistencyTests: XCTestCase {
+    /// `list` numbers the FULL inventory — plists, launchd, BTM-only leftovers.
+    /// Remediation must resolve numeric ids against exactly that set: with the
+    /// BTM layer skipped (V0.4.2 and earlier) "03" pointed at a different entry.
+    private let btmText = """
+    Records for UID 501 : AAAA-BBBB
+    Items:
+     #1:
+                      Name: GoneHelper
+                      Type: legacy agent (0x20010)
+                Disposition: [enabled, allowed, notified] (0xb)
+                Identifier: 16.com.example.gone
+                        URL: file:///Library/LaunchAgents/com.example.gone.plist
+            Executable Path: /Applications/Gone.app/Contents/MacOS/gone
+    """
+
+    private func makeRunner() -> ScriptedCommandRunner {
+        ScriptedCommandRunner(responses: [
+            "/bin/launchctl print gui/501":
+                CommandResult(exitCode: 0, stdout: "gui/501 = {\nservices = {\n}\n}\n", stderr: ""),
+            "/bin/launchctl print-disabled gui/501":
+                CommandResult(exitCode: 0, stdout: "", stderr: ""),
+            "/usr/bin/sfltool dumpbtm":
+                CommandResult(exitCode: 0, stdout: btmText, stderr: ""),
+        ])
+    }
+
+    private let withBTM = ScanOptions(includeUser: true, includeSystem: false,
+                                      scanBTM: true, scanSignatures: false)
+
+    func testDefaultRemediationScanIncludesTheBTMLayer() {
+        XCTAssertTrue(RemediationEngine.defaultScanOptions.scanBTM)
+        XCTAssertTrue(RemediationEngine.defaultScanOptions.includeUser)
+        XCTAssertTrue(RemediationEngine.defaultScanOptions.includeSystem)
+    }
+
+    func testNumericIdResolvesToTheEntryListShows() throws {
+        let home = try makeUserHome(withPlists: ["com.example.alpha", "com.example.beta"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let runner = makeRunner()
+        let listed = ScanCoordinator(environment: ScanEnvironment(runner: runner, home: home, uid: 501))
+            .perform(options: withBTM).items
+        let beta = try XCTUnwrap(listed.first { $0.label == "com.example.beta" })
+        XCTAssertTrue(listed.contains { $0.key.hasPrefix("btm:") },
+                      "the BTM-only leftover must be part of the numbered set")
+
+        let engine = RemediationEngine(environment: RemediationEnvironment(runner: runner, home: home, uid: 501),
+                                       audit: AuditLog(directory: home + "/logs"))
+        let result = engine.run(operation: .disable, target: beta.id, apply: false, scanOptions: withBTM)
+        XCTAssertEqual(result.target, "gui/501/com.example.beta",
+                       "id \(beta.id) must mean the same entry as in list")
+    }
+
+    func testBTMOnlyLeftoverResolvesAndIsRefusedHonestly() throws {
+        let home = try makeUserHome(withPlists: ["com.example.alpha"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let runner = makeRunner()
+        let engine = RemediationEngine(environment: RemediationEnvironment(runner: runner, home: home, uid: 501),
+                                       audit: AuditLog(directory: home + "/logs"))
+        let result = engine.run(operation: .remove, target: "GoneHelper", apply: true, scanOptions: withBTM)
+        guard case .refused(let reason) = result.status else {
+            return XCTFail("expected refusal, got \(result.status)")
+        }
+        XCTAssertTrue(reason.contains("Background Task Management"), reason)
+        XCTAssertFalse(reason.contains("no match"), "the leftover is visible in list and must resolve: \(reason)")
+    }
+}

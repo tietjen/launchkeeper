@@ -24,11 +24,13 @@ import Foundation
 // guarded the same way — no snapshot, no reset — and says in words that its
 // snapshot is an audit artifact, not a backup: sfltool has no import.
 
-private func runScan(userOnly: Bool, systemOnly: Bool) -> ScanReport {
-    var options = ScanOptions()
-    if userOnly { options.includeSystem = false }
-    if systemOnly { options.includeUser = false }
-    return ScanCoordinator().perform(options: options)
+/// Always the FULL scan: display ids are positional per scan run, so every
+/// command that prints or resolves an id must see the same item set. `--user`
+/// and `--system` narrow the ROWS, never the scan (V0.4.3 — before, `list
+/// --user` renumbered the inventory and its ids meant something else to
+/// `disable`/`remove`).
+private func runScan() -> ScanReport {
+    ScanCoordinator().perform(options: ScanOptions())
 }
 
 private func emitWarnings(_ report: ScanReport) {
@@ -68,7 +70,7 @@ struct ListCommand: ParsableCommand {
         filter.systemOnly = systemOnly
         filter.includeAll = all
 
-        let report = runScan(userOnly: userOnly, systemOnly: systemOnly)
+        let report = runScan()
         let rows = filter.apply(to: report.items)
         if json {
             print(try JSONRenderer.encode(rows))
@@ -140,7 +142,7 @@ struct DoctorCommand: ParsableCommand {
     }
 
     mutating func run() throws {
-        let report = runScan(userOnly: false, systemOnly: false)
+        let report = runScan()
         if json {
             let orphans = report.items.filter { $0.orphaned }
             print(try JSONRenderer.encode(DoctorJSON(
@@ -509,7 +511,7 @@ struct Btmctl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "btmctl",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.4.2).
+        Background-service inventory + app correlation + gated remediation (V0.4.3).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -518,7 +520,7 @@ struct Btmctl: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.4.2",
+        version: "0.4.3",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

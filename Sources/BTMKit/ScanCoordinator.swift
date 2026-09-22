@@ -6,7 +6,7 @@ import Darwin
 /// Read-only V0.1 pipeline: scanners -> correlation -> analysis.
 /// This type contains NO write or delete logic of any kind; every command it
 /// runs is a read (`launchctl print*`, `sfltool dumpbtm`, `codesign -dvvv`).
-public struct ScanOptions {
+public struct ScanOptions: Sendable {
     public var includeUser: Bool
     public var includeSystem: Bool
     public var scanBTM: Bool

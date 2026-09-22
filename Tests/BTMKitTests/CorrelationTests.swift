@@ -211,3 +211,27 @@ final class PercentEncodedBundleProbeTests: XCTestCase {
         XCTAssertFalse(item.orphaned)
     }
 }
+
+/// V0.4.3: an override exists independently of a loaded job. An unloaded
+/// agent whose label is `disabled` in print-disabled is disabled — before,
+/// only launchd-listed items consulted the map, so `remove` after `disable`
+/// left the override dangling.
+final class PlistOnlyOverrideTests: XCTestCase {
+    private let job = LaunchJobRecord(label: "de.example.guard",
+                                      path: "/Library/LaunchAgents/de.example.guard.plist",
+                                      domain: .system, kind: .launchAgentSystem,
+                                      program: "/usr/local/bin/guard.sh", arguments: [],
+                                      runAtLoad: true, keepAlive: false, ownerName: "root", malformed: false)
+
+    func testUnloadedAgentWithOverrideIsDisabled() {
+        let (items, _) = ItemCorrelator().correlate(.init(jobs: [job], launchd: [], btm: [],
+                                                          disabled: ["de.example.guard": false], uid: 501))
+        XCTAssertEqual(items.first?.enabled, false)
+    }
+
+    func testUnloadedAgentWithoutOverrideStaysEnabled() {
+        let (items, _) = ItemCorrelator().correlate(.init(jobs: [job], launchd: [], btm: [],
+                                                          disabled: [:], uid: 501))
+        XCTAssertEqual(items.first?.enabled, true)
+    }
+}

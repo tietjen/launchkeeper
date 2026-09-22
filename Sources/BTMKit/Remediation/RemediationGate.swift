@@ -31,6 +31,18 @@ public enum RemediationGate {
         if label.hasPrefix("com.apple.") {
             return .denied(reason: "Apple system component (com.apple.*) — read-only by policy")
         }
+        // A Background Task Management leftover — record present, no launch
+        // plist, no launchd job — has nothing to unload, override or delete.
+        // `enable` is the one exception: it may drop a dangling override
+        // (V0.4.3, after `remove` of a disabled agent left one behind).
+        if item.btmPresent, !item.plistPresent, !item.launchdPresent,
+           !(operation == .enable && !item.enabled) {
+            return .denied(reason: "only a Background Task Management record remains (no launch "
+                + "plist, no launchd job) — nothing here to \(operation.rawValue). sfltool has "
+                + "no per-item delete; the record is inert and BTM drops it in its own "
+                + "housekeeping (seen live within minutes after the plist went), "
+                + "otherwise `btmctl resetbtm`")
+        }
         // Defense in depth: /System territory is refused even with --apply/sudo.
         for probe in [item.path, item.executable].compactMap({ $0 }) {
             if PathUtils.canonicalize(probe).hasPrefix("/System") {

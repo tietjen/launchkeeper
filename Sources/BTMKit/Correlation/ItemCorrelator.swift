@@ -47,6 +47,10 @@ public struct ItemCorrelator {
             item.sources.append(SourceEvidence(kind: .plist, detail: job.path, confidence: .high))
             if job.runAtLoad { item.metadata["runAtLoad"] = "true" }
             if job.keepAlive { item.metadata["keepAlive"] = "true" }
+            // An override exists independently of a loaded job: an unloaded
+            // agent with `print-disabled` = disabled is disabled (V0.4.3 —
+            // without this, `remove` did not know to drop the stale override).
+            if isDisabled(label: job.label, in: input.disabled) { item.enabled = false }
             accum[job.label] = item
         }
 
