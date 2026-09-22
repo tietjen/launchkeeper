@@ -39,6 +39,13 @@ REPO_NAME="${REPO_NAME:-macos-housecleaning-tool}"
 TAG="v$VERSION"
 PKG="btmctl-$TAG-macos-universal"
 
+# Read the notes NOW: dist/ is wiped below, and a notes file living there
+# (as happened for v0.4.2) would vanish before the upload step needs it.
+NOTES_TEXT=""
+if [[ -n "$NOTES_FILE" ]]; then
+    NOTES_TEXT="$(cat "$NOTES_FILE")" || { echo "cannot read notes: $NOTES_FILE" >&2; exit 2; }
+fi
+
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 DIST="$ROOT/dist"
@@ -106,8 +113,8 @@ git push origin "$TAG"
 echo "==> Gitea release"
 TOKEN="${GITEA_TOKEN:-$(rbw get PKGTOKEN)}"
 API="https://$GITEA_HOST/api/v1/repos/$REPO_OWNER/$REPO_NAME"
-if [[ -n "$NOTES_FILE" ]]; then
-    BODY_TEXT="$(cat "$NOTES_FILE")"
+if [[ -n "$NOTES_TEXT" ]]; then
+    BODY_TEXT="$NOTES_TEXT"
 else
     BODY_TEXT="btmctl $TAG — test release (universal, Developer ID signed, $NOTARIZED). See README → Installation."
 fi
