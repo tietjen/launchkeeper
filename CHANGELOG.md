@@ -5,7 +5,23 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.1
+## [Unreleased] — 0.5.2
+
+### Fixed
+- `background` now matches the System Settings pane (verified against it):
+  the switch is the components' BTM disposition bit — a launchd override
+  (`launchctl disable`) is invisible to the pane and is shown as its own
+  `LAUNCHD` column instead of flipping the switch (GoogleUpdater and
+  Wireshark read ON in the pane while launchd had them disabled); "Open at
+  Login" lists apps registered by themselves (BTM `app` records with an
+  enabled bit), not SMAppService `login item` helpers, which belong under
+  their app's row; unnamed developer rows are named after their component's
+  executable ("bash"), as the pane does.
+- A timed-out child that ignores SIGTERM is now killed (its whole process
+  group for the piped seam) and reaped; a lingering client kept our pipe
+  open and, for `sfltool`, queued up behind the BTM daemon.
+
+## [0.5.1] — 2026-09-22
 
 ### Added
 - Every item carries `category` (Autoruns-style tab), `control` (what

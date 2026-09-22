@@ -75,7 +75,11 @@ public final class SystemCommandRunner: CommandRunner {
             usleep(20_000)
         }
         if process.isRunning {
-            process.terminate()
+            // SIGTERM first, SIGKILL after a short grace period: a client
+            // that ignores TERM (sfltool waiting on its daemon did) would
+            // otherwise linger, and every lingering client queues up behind
+            // the daemon — each timeout made the next call slower (V0.5.2).
+            Self.terminateForSure(process)
             group.wait()
             return CommandResult(exitCode: -2, stdout: "", stderr: "timeout after \(timeout)s")
         }
@@ -87,6 +91,23 @@ public final class SystemCommandRunner: CommandRunner {
             stdout: String(decoding: outBox.data, as: UTF8.self),
             stderr: String(decoding: errBox.data, as: UTF8.self)
         )
+    }
+
+    /// SIGTERM to the child's whole process group, SIGKILL to it two seconds
+    /// later if anything is still alive, then reap. The group, not just the
+    /// pid: Foundation spawns the child into its own group, and a grandchild
+    /// (`sh -c '…; sleep 30'`) holding our pipe would otherwise keep the
+    /// read to EOF blocked long after the child is dead.
+    static func terminateForSure(_ process: Process) {
+        let pid = process.processIdentifier
+        _ = kill(-pid, SIGTERM)
+        let grace = Date().addingTimeInterval(2)
+        while process.isRunning && Date() < grace { usleep(20_000) }
+        if process.isRunning {
+            _ = kill(-pid, SIGKILL)
+        }
+        process.waitUntilExit()
+        _ = kill(-pid, SIGKILL)   // stragglers in the group, if any
     }
 
     /// INHERITED stdio AND our process group: the child talks to the user's
@@ -126,7 +147,17 @@ public final class SystemCommandRunner: CommandRunner {
             if reaped < 0 && errno != EINTR { return -1 }
             if Date() >= deadline {
                 _ = kill(pid, SIGTERM)
-                _ = waitpid(pid, &status, 0)
+                let grace = Date().addingTimeInterval(2)
+                var reaped: pid_t = 0
+                while Date() < grace {
+                    reaped = waitpid(pid, &status, WNOHANG)
+                    if reaped == pid { break }
+                    usleep(20_000)
+                }
+                if reaped != pid {
+                    _ = kill(pid, SIGKILL)
+                    _ = waitpid(pid, &status, 0)
+                }
                 return -2
             }
             usleep(20_000)

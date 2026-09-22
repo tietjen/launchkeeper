@@ -192,15 +192,19 @@ final class BTMContainerIndexTests: XCTestCase {
 }
 
 final class BackgroundViewTests: XCTestCase {
-    private func item(_ name: String, parent: String, identifier: String, enabled: Bool,
-                      category: ItemCategory = .launchItems, type: String = "legacy agent") -> BackgroundItem {
+    /// `btm` = the record's disposition bit (the pane's switch); `launchd` =
+    /// the effective launchd state (false = a print-disabled override).
+    private func item(_ name: String, parent: String, identifier: String, btm: Bool, launchd: Bool = true,
+                      category: ItemCategory = .launchItems, type: String = "legacy agent",
+                      executable: String? = nil) -> BackgroundItem {
         var i = BackgroundItem(id: "0\(abs(name.hashValue) % 9 + 1)", key: "btm:" + identifier, displayName: name,
-                               type: .btmEntry, label: identifier, domain: .user, enabled: enabled,
-                               category: category)
+                               type: .btmEntry, label: identifier, executable: executable, domain: .user,
+                               enabled: btm && launchd, category: category)
         i.btmPresent = true
         i.metadata["btm-parent"] = parent
         i.metadata["btm-identifier"] = identifier
         i.metadata["btm-type"] = type
+        i.metadata["btm-disposition"] = btm ? "[enabled, allowed, notified] (0xb)" : "[disabled, allowed, not notified] (0x2)"
         return i
     }
 
@@ -208,7 +212,7 @@ final class BackgroundViewTests: XCTestCase {
         ScanReport(items: items, uncorrelated: [], warnings: [], checks: [], btmContainers: containers)
     }
 
-    func testToggleIsDerivedFromComponents() {
+    func testToggleIsTheComponentsBTMBit() {
         let containers = [
             BTMContainer(identifier: "2.on", name: "All On", kind: .app, dispositionTokens: ["disabled"]),
             BTMContainer(identifier: "2.off", name: "All Off", kind: .app, dispositionTokens: ["disabled"]),
@@ -216,9 +220,9 @@ final class BackgroundViewTests: XCTestCase {
             BTMContainer(identifier: "2.empty", name: "Empty", kind: .app),
         ]
         let items = [
-            item("a", parent: "2.on", identifier: "8.a", enabled: true), item("b", parent: "2.on", identifier: "8.b", enabled: true),
-            item("c", parent: "2.off", identifier: "8.c", enabled: false),
-            item("d", parent: "2.mixed", identifier: "8.d", enabled: true), item("e", parent: "2.mixed", identifier: "8.e", enabled: false),
+            item("a", parent: "2.on", identifier: "8.a", btm: true), item("b", parent: "2.on", identifier: "8.b", btm: true),
+            item("c", parent: "2.off", identifier: "8.c", btm: false),
+            item("d", parent: "2.mixed", identifier: "8.d", btm: true), item("e", parent: "2.mixed", identifier: "8.e", btm: false),
         ]
         let view = BackgroundView.build(from: report(items: items, containers: containers))
         let byName = Dictionary(uniqueKeysWithValues: view.background.map { ($0.name, $0) })
@@ -229,44 +233,73 @@ final class BackgroundViewTests: XCTestCase {
         XCTAssertEqual(byName["All On"]?.rawDisposition, ["disabled"], "raw bit kept for the record")
     }
 
-    func testAppLevelRegistrationUsesTheContainerBit() {
-        // The SMAppService shape (live: Bitwarden): no components, the app's
-        // own record says enabled — that IS the switch, and it is on.
+    func testLaunchdOverrideDoesNotFlipTheSwitch() {
+        // Live 2026-09-22: GoogleUpdater / Wireshark — launchctl disable set,
+        // BTM still enabled, the pane shows ON. The override is its own column.
+        let containers = [BTMContainer(identifier: "2.upd", name: "Updater", kind: .app)]
+        let items = [item("wake", parent: "2.upd", identifier: "8.wake", btm: true, launchd: false)]
+        let view = BackgroundView.build(from: report(items: items, containers: containers))
+        let row = view.background[0]
+        XCTAssertEqual(row.toggle, .on, "the pane's switch follows the BTM bit")
+        XCTAssertEqual(row.components[0].btmEnabled, true)
+        XCTAssertEqual(row.components[0].launchdDisabled, true)
+        XCTAssertEqual(row.components[0].enabled, false, "effective state honours the override")
+        let text = view.renderText()
+        XCTAssertTrue(text.contains("DISABLED*"), text)
+        XCTAssertTrue(text.contains("lifts the override"), text)
+    }
+
+    func testAppLevelRegistrationIsAnOpenAtLoginEntryToo() {
+        // Live: Bitwarden — an app record with its own enabled bit, no
+        // components; the pane lists it under Open at Login AND as an ON row.
         let containers = [
-            BTMContainer(identifier: "2.sm", name: "SM App", kind: .app, dispositionTokens: ["enabled", "allowed", "notified"]),
+            BTMContainer(identifier: "2.sm", name: "SM App", kind: .app, bundlePath: "/Applications/SM App.app",
+                         dispositionTokens: ["enabled", "allowed", "notified"]),
             BTMContainer(identifier: "2.stale", name: "Stale", kind: .app, dispositionTokens: ["disabled", "allowed", "not notified"]),
         ]
         let view = BackgroundView.build(from: report(items: [], containers: containers))
         let byName = Dictionary(uniqueKeysWithValues: view.background.map { ($0.name, $0) })
         XCTAssertEqual(byName["SM App"]?.toggle, .appLevel)
         XCTAssertEqual(byName["Stale"]?.toggle, Optional(.none))
+        XCTAssertEqual(view.loginItems.map(\.name), ["SM App"])
+        XCTAssertEqual(view.loginItems[0].bundlePath, "/Applications/SM App.app")
         let text = view.renderText()
+        XCTAssertTrue(text.contains("Open at Login (1)"), text)
         XCTAssertTrue(text.contains("the app itself is registered"), text)
         XCTAssertTrue(text.contains("stale row?"), text)
     }
 
+    func testSMAppServiceLoginItemIsAComponentNotAnOpenAtLoginEntry() {
+        // Live: DockerHelper (type "login item", parent Docker) is NOT under
+        // Open at Login — it belongs under Docker's row.
+        let containers = [BTMContainer(identifier: "2.app", name: "Vendor App", kind: .app, teamIdentifier: "ABCDE12345")]
+        let helper = item("StartUpHelper", parent: "2.app", identifier: "4.helper", btm: true,
+                          category: .loginItems, type: "login item")
+        let view = BackgroundView.build(from: report(items: [helper], containers: containers))
+        XCTAssertTrue(view.loginItems.isEmpty)
+        XCTAssertEqual(view.background[0].components.map(\.name), ["StartUpHelper"])
+        XCTAssertEqual(view.background[0].toggle, .on)
+        let text = view.renderText()
+        XCTAssertTrue(text.contains("Open at Login (0)"), text)
+        XCTAssertTrue(text.contains("on         app        Vendor App"), text)
+        XCTAssertFalse(try! JSONRenderer.encode(view).isEmpty)
+    }
+
+    func testUnnamedContainerIsNamedAfterItsComponentExecutable() {
+        // Live: the pane shows "bash" for a developer row without a name.
+        let containers = [BTMContainer(identifier: "32.T.unnamed", name: "32.T.unnamed", kind: .developer)]
+        let items = [item("guard", parent: "32.T.unnamed", identifier: "16.de.example.guard", btm: true,
+                          executable: "/bin/bash")]
+        let view = BackgroundView.build(from: report(items: items, containers: containers))
+        XCTAssertEqual(view.background[0].name, "bash")
+    }
+
     func testEmbeddedListAlsoAttachesComponents() {
         let containers = [BTMContainer(identifier: "2.app", name: "App", kind: .app, embedded: ["8.x"])]
-        var orphanOfParent = item("x", parent: "2.other", identifier: "8.x", enabled: true)
+        var orphanOfParent = item("x", parent: "2.other", identifier: "8.x", btm: true)
         orphanOfParent.metadata["btm-parent"] = nil
         let view = BackgroundView.build(from: report(items: [orphanOfParent], containers: containers))
         XCTAssertEqual(view.background.first?.components.map(\.name), ["x"])
-    }
-
-    func testLoginItemsSectionAndTextRender() throws {
-        let containers = [BTMContainer(identifier: "2.app", name: "Vendor App", kind: .app, teamIdentifier: "ABCDE12345")]
-        var login = item("StartUpHelper", parent: "2.app", identifier: "4.helper", enabled: true,
-                         category: .loginItems, type: "login item")
-        login.parentApplication = "Vendor App"
-        let view = BackgroundView.build(from: report(items: [login], containers: containers))
-        XCTAssertEqual(view.loginItems.map(\.name), ["StartUpHelper"])
-        let text = view.renderText()
-        XCTAssertTrue(text.contains("Open at Login (1)"))
-        XCTAssertTrue(text.contains("Allow in the Background (1 rows: 1 apps, 0 developers)"))
-        XCTAssertTrue(text.contains("on      app        Vendor App"), text)
-        XCTAssertTrue(text.contains("StartUpHelper"))
-        XCTAssertTrue(text.contains("does not write to Background Task Management"))
-        XCTAssertFalse(try JSONRenderer.encode(view).isEmpty)
     }
 }
 

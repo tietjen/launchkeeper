@@ -40,3 +40,25 @@ final class SystemCommandRunnerInteractiveTests: XCTestCase {
         XCTAssertEqual(runner.runInteractive(command: "/bin/sh", arguments: ["-c", "kill -9 $$"], timeout: 10), 137)
     }
 }
+
+/// V0.5.2: a child that ignores SIGTERM must still die at the timeout —
+/// lingering clients queued up behind the BTM daemon and made every later
+/// call slower. Both seams, /bin/sh only.
+final class TimeoutKillsIgnoringChildrenTests: XCTestCase {
+    private let runner = SystemCommandRunner()
+    private let stubborn = ["-c", "trap '' TERM; sleep 30"]
+
+    func testPipedRunKillsAChildThatIgnoresTerm() {
+        let started = Date()
+        let result = runner.run(command: "/bin/sh", arguments: stubborn, timeout: 0.3)
+        XCTAssertEqual(result.exitCode, -2)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 6, "TERM ignored → KILL after the grace period")
+    }
+
+    func testInteractiveRunKillsAChildThatIgnoresTerm() {
+        let started = Date()
+        let code = runner.runInteractive(command: "/bin/sh", arguments: stubborn, timeout: 0.3)
+        XCTAssertEqual(code, -2)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 6)
+    }
+}

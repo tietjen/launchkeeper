@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.1)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.2)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -298,13 +298,24 @@ Every item carries three more dimensions, visible in `inspect` and `--json`:
   Unknown stays unknown.
 
 `background` rebuilds the System Settings › General › Login Items &
-Extensions pane: "Open at Login" (login items) and "Allow in the Background"
-(one row per app or developer, its components beneath). The switch state is
-**derived from the components** — the container record's own BTM bit is not
-the switch (it reads `disabled` for 48 of 49 containers on a healthy Mac);
-the one exception is an app registered by itself without components
-(`app-level`), where that bit is the switch. launchkeeper never writes to
-Background Task Management; the switch stays in System Settings.
+Extensions pane, verified against the pane itself (V0.5.2):
+
+- **Open at Login** lists apps registered by themselves — BTM `app` records
+  whose own bit is `enabled` (a login item added in the pane). SMAppService
+  helpers of type `login item` are *not* listed there; they are components
+  under their app's row below.
+- **Allow in the Background**: one row per app or developer; the switch is
+  the components' BTM disposition bit — exactly what the pane shows. A
+  launchd override (`launchctl disable`) is invisible to the pane, so it is
+  a separate `LAUNCHD` column, never folded into the switch: an app can read
+  ON there while launchd keeps its job disabled.
+- A container's own bit is not the switch (48 of 49 read `disabled` on a
+  healthy Mac) — except for app-level registrations without components.
+  Unnamed rows are named after their component's executable, as the pane
+  does.
+
+launchkeeper never writes to Background Task Management; the switch stays
+in System Settings.
 
 ## How it works
 
@@ -363,7 +374,7 @@ swift test
 Tests never shell out or touch real launchd state: all external commands
 go through an injectable `CommandRunner`, and the pipeline is tested
 end-to-end against captured fixtures (`Tests/Fixtures`, recorded live on
-macOS 26.6.2 without sudo). The 184-test suite includes the V0.2 write
+macOS 26.6.2 without sudo). The 188-test suite includes the V0.2 write
 paths, the V0.3 deletion path, the V0.4 app context (bundle trees in
 temp directories, `mdfind` scripted — including the "wedged index must
 not manufacture a gone-verdict" property) and the guarded `resetbtm`
@@ -432,6 +443,10 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.5.2** ✅ — `background` verified against the System Settings pane:
+  the switch is the components' BTM bit, launchd overrides get their own
+  column, app-level registrations are the Open-at-Login entries, unnamed
+  rows take their component's executable name
 - **V0.5.1** ✅ — the Autoruns-style dimensions on every item (category,
   control matrix as data, provenance), `list --category`, and `background`:
   the Login Items & Extensions pane rebuilt from the inventory with the
