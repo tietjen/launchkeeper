@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.0
+## [0.5.0] — 2026-09-22
 
 ### Changed
 - Renamed the project from btmctl to **launchkeeper**: package
