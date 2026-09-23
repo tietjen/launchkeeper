@@ -39,8 +39,9 @@ public final class SignatureScanner {
             if line.hasPrefix("Identifier=") {
                 identifier = String(line.dropFirst("Identifier=".count))
             } else if line.hasPrefix("TeamIdentifier=") {
+                // "TeamIdentifier=not set" is codesign's way of saying none.
                 let t = String(line.dropFirst("TeamIdentifier=".count))
-                teamIdentifier = t.split(separator: " ").first.map(String.init)
+                teamIdentifier = t == "not set" ? nil : t.split(separator: " ").first.map(String.init)
             } else if line.hasPrefix("Authority="), authority0 == nil {
                 authority0 = String(line.dropFirst("Authority=".count))
             }

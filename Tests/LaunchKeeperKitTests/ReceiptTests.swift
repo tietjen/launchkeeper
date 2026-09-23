@@ -192,6 +192,18 @@ final class ReceiptsViewTests: XCTestCase {
     }
 }
 
+final class SignatureTeamTests: XCTestCase {
+    func testNotSetTeamIsNoTeam() {
+        let runner = ScriptedCommandRunner(responses: [
+            "/usr/bin/codesign -dvvv /opt/x/bin": CommandResult(exitCode: 0, stdout: "",
+                stderr: "Identifier=x\nAuthority=(unavailable)\nSignature=adhoc\nTeamIdentifier=not set\n"),
+        ])
+        let record = SignatureScanner().status(for: "/opt/x/bin", runner: runner)
+        XCTAssertNil(record.teamIdentifier)
+        XCTAssertEqual(record.status, "adhoc")
+    }
+}
+
 final class ReceiptStageTests: XCTestCase {
     func testStageIndexesReceiptsAndSignatureDetailsLandInMetadata() throws {
         let root = tempRoot("stage")

@@ -5,7 +5,29 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.6.0
+## [Unreleased] — 0.6.1
+
+### Added
+- `launchkeeper snapshot [save] [--name]` saves the whole inventory as
+  JSON under `~/Library/Application Support/launchkeeper/inventory/`;
+  `snapshot list` lists them newest first.
+- `launchkeeper diff [<before>] [<after>]` compares a snapshot (default:
+  the latest; a name, file name or path; any `list --json` file works)
+  with a fresh scan or a second snapshot, by entry key: added, removed,
+  and changed configuration fields (enabled, path, executable, signature,
+  Team ID, orphaned, origin, control, schedule, listening, firewall,
+  helper clients, extension state, election, shell hints …). `--state`
+  adds loaded/running, `--all` includes Apple internals, `--json` and
+  `--exit-code` for scripts.
+- `list --csv` (all columns, RFC-style quoting) and `list --markdown`.
+
+### Changed
+- Entry keys carry no volatile parts any more: listening processes are
+  `net:<executable>`, power events `pmset:<owner>:<kind>`, cron lines
+  `cron:<user>:<source>:<command>`; twins get `#2`, `#3` …. The pid, index
+  and line number stay in the metadata. 8 tests.
+
+## [0.6.0] — 2026-09-23
 
 ### Added
 - Provenance from package receipts: every scan indexes the non-Apple

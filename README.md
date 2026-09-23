@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.0)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.1)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -201,6 +201,15 @@ launchkeeper list --origin receipt    # only entries a package receipt accounts 
 launchkeeper list --origin manual     # apps dragged out of a disk image: no receipt, no App Store
 launchkeeper receipts                 # the installer packages behind the inventory: version, install
                                      # date, files still on disk, the entries they run (--missing, --all)
+
+# V0.6 — export, snapshots, diff
+launchkeeper list --csv > inventory.csv       # spreadsheet export (all columns, orphan reasons, origin)
+launchkeeper list --markdown                  # Markdown table for a report
+launchkeeper snapshot --name before-upgrade   # save the whole inventory (~/Library/Application Support/
+launchkeeper snapshot list                    #   launchkeeper/inventory/<timestamp>[-name].json)
+launchkeeper diff                             # what changed since the latest snapshot: added, removed,
+launchkeeper diff before-upgrade --exit-code  #   changed configuration; exit 1 on differences (scripts)
+launchkeeper diff <older> <newer> --json      # two snapshots against each other
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -470,6 +479,31 @@ where, and how much of it a manual deletion left behind.
 Signature details that `codesign -dvvv` already reports — identifier,
 Team ID and the leaf authority — are now metadata on every checked item.
 
+## Snapshots, diff, export (V0.6.1)
+
+`launchkeeper snapshot` saves the whole inventory of one scan as JSON under
+`~/Library/Application Support/launchkeeper/inventory/`, optionally with a
+`--name`; `snapshot list` shows what is there. `launchkeeper diff` compares
+the latest snapshot (or the one you name, or any `list --json` file) with a
+fresh scan — or two snapshots with each other — **by entry key**: entries
+that appeared, entries that vanished, and entries whose configuration
+changed, field by field (enabled, path, executable, signature, Team ID,
+orphan verdict, origin, control level, schedule, listening ports, firewall
+rule, helper clients, extension state, shell launch hints …). Whether a
+job happens to be running is not a configuration change; `--state` adds
+loaded/running. Apple internals stay hidden unless `--all`. `--exit-code`
+returns 1 on differences, so a cron job or a login script can notice a new
+autostart entry; `--json` gives the diff as data. Keys are stable across
+scans on purpose: a listening process is `net:<executable>`, a power event
+`pmset:<owner>:<kind>`, a cron line `cron:<user>:<source>:<command>`
+(twins get `#2`, `#3` …), never a pid, an index or a line number.
+
+`list --csv` writes every row with all columns (key, category, type,
+domain, state, enabled, signature, Team ID, name, app, path, executable,
+origin, package, install date, flags, orphan reasons, control), quoted
+where needed; `list --markdown` renders a table for a report. Both honour
+the usual filters.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -606,6 +640,9 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.6.1** ✅ — `snapshot` / `snapshot list`, `diff` by stable entry
+  key (added, removed, changed fields; `--state`, `--exit-code`, `--json`,
+  two snapshots), `list --csv` and `list --markdown`
 - **V0.6.0** ✅ — provenance from package receipts (`pkgutil` index per
   scan: package id, version, install date on every attributed item;
   `manual` for drag-installed apps), `list --origin`, `receipts` with

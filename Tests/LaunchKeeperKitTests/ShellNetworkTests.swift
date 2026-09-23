@@ -203,12 +203,12 @@ final class ShellNetworkCorrelationTests: XCTestCase {
             executable: "/Applications/Beeper Desktop.app/Contents/MacOS/Beeper Desktop",
             sockets: [ListeningSocket(pid: 2528, command: "Beeper", user: "alice", proto: "tcp", address: "127.0.0.1:23373")]))
         let items = correlate(.init(jobs: [daemon], launchd: [], btm: [], disabled: [:], uid: 501, network: network))
-        let app = try XCTUnwrap(items.first { $0.key == "net:/Applications/Beeper Desktop.app/Contents/MacOS/Beeper Desktop:2528" })
+        let app = try XCTUnwrap(items.first { $0.key == "net:/Applications/Beeper Desktop.app/Contents/MacOS/Beeper Desktop" })
         XCTAssertNil(app.metadata["network-entry"])
         XCTAssertEqual(app.metadata["listening"], "tcp/23373 (loopback)")
         XCTAssertTrue(app.control?.reason.contains("no inventory entry starts it") == true, app.control?.reason ?? "-")
 
-        let listener = try XCTUnwrap(items.first { $0.key == "net:\(binary):88" })
+        let listener = try XCTUnwrap(items.first { $0.key == "net:\(binary)" })
         XCTAssertEqual(listener.category, .network)
         XCTAssertEqual(listener.metadata["network-entry"], "com.vendor.daemon")
         XCTAssertEqual(listener.metadata["listening"], "tcp/8443")
@@ -223,7 +223,7 @@ final class ShellNetworkCorrelationTests: XCTestCase {
         XCTAssertEqual(standalone.type, .firewallRule)
         XCTAssertEqual(standalone.control?.level, .displayOnly)
         // Apple's daemons hide by default, show with --all.
-        let apple = try XCTUnwrap(items.first { $0.key == "net:/usr/libexec/rapportd:1065" })
+        let apple = try XCTUnwrap(items.first { $0.key == "net:/usr/libexec/rapportd" })
         var filter = ListFilter(); filter.category = .network
         XCTAssertEqual(filter.apply(to: items).map(\.key).sorted(), [listener.key, standalone.key, app.key].sorted())
         filter.includeAll = true

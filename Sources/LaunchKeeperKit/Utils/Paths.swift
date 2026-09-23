@@ -22,4 +22,8 @@ public enum LaunchKeeperPaths {
     public static func btmSnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/btm-snapshots"
     }
+    /// V0.6.1: whole-inventory snapshots for `diff`.
+    public static func inventorySnapshots(home: String) -> String {
+        home + "/Library/Application Support/\(productName)/inventory"
+    }
 }

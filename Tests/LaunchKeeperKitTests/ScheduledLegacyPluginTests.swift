@@ -206,13 +206,13 @@ final class ScheduledLegacyPluginCorrelationTests: XCTestCase {
         scheduled.powerEvents = [PowerEvent(index: 0, kind: "wake", when: "09/22/2026 16:38:36",
                                             owner: "com.apple.alarm.user-invisible-com.apple.acmd.alarm", userVisible: false)]
         let items = correlate(.init(jobs: [], launchd: [], btm: [], disabled: [:], uid: 501, scheduled: scheduled))
-        let gone = try XCTUnwrap(items.first { $0.key == "cron:alice:crontab:4" })
+        let gone = try XCTUnwrap(items.first { $0.key == "cron:alice:crontab:/opt/gone/run.sh --nightly" })
         XCTAssertEqual(gone.category, .scheduled)
         XCTAssertEqual(gone.metadata["schedule"], "cron 0 3 * * *")
         XCTAssertTrue(gone.orphaned)
         XCTAssertTrue(gone.orphanReasons.contains { $0.hasPrefix("executable missing: /opt/gone/run.sh") }, "\(gone.orphanReasons)")
         XCTAssertEqual(gone.control?.level, .displayOnly)
-        let echo = try XCTUnwrap(items.first { $0.key == "cron:alice:crontab:5" })
+        let echo = try XCTUnwrap(items.first { $0.key == "cron:alice:crontab:echo up" })
         XCTAssertNil(echo.executable, "relative commands are not resolvable")
         XCTAssertFalse(echo.orphaned)
         // Apple's own power alarms hide in the default list like other Apple internals.

@@ -46,6 +46,10 @@ struct ListCommand: ParsableCommand {
 
     @Flag(name: .customLong("json"), help: "JSON output instead of a table")
     var json = false
+    @Flag(name: .customLong("csv"), help: "CSV export (V0.6)")
+    var csv = false
+    @Flag(name: .customLong("markdown"), help: "Markdown table export (V0.6)")
+    var markdown = false
     @Flag(name: .customLong("orphans"), help: "show only orphaned entries (reason column)")
     var orphans = false
     @Flag(name: .customLong("running"), help: "show only entries with a live process")
@@ -96,10 +100,141 @@ struct ListCommand: ParsableCommand {
         let rows = filter.apply(to: report.items)
         if json {
             print(try JSONRenderer.encode(rows))
+        } else if csv {
+            print(ExportRenderer.csv(rows))
+        } else if markdown {
+            print(ExportRenderer.markdown(rows))
         } else {
             print(TableRenderer.render(rows, mode: orphans ? .orphans : .table))
             emitWarnings(report)
         }
+    }
+}
+
+struct SnapshotCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "snapshot",
+        abstract: "Save or list whole-inventory snapshots for `diff` (V0.6).",
+        subcommands: [SnapshotSaveCommand.self, SnapshotListCommand.self],
+        defaultSubcommand: SnapshotSaveCommand.self)
+}
+
+struct SnapshotSaveCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "save",
+        abstract: "Scan and save the full inventory as a snapshot (default).")
+
+    @Option(name: .customLong("name"), help: "a name for the snapshot (letters, digits, - and _)")
+    var name: String?
+    @Flag(name: .customLong("json"), help: "machine-readable result")
+    var json = false
+
+    mutating func run() throws {
+        let report = runScan()
+        let snapshot = InventorySnapshot(version: LaunchKeeper.configuration.version,
+                                         host: ProcessInfo.processInfo.hostName, name: name,
+                                         incompleteLayers: report.incompleteLayers, items: report.items)
+        let store = InventorySnapshotStore(home: NSHomeDirectory())
+        let path = try store.save(snapshot)
+        if json {
+            struct Saved: Codable { var file: String; var items: Int; var incomplete: [String] }
+            print(try JSONRenderer.encode(Saved(file: path, items: report.items.count, incomplete: report.incompleteLayers)))
+        } else {
+            print("saved \(report.items.count) items to \(path)")
+            if !report.incompleteLayers.isEmpty {
+                print("note: inventory incomplete (\(report.incompleteLayers.joined(separator: ", "))) — "
+                    + "a diff against this snapshot will show those layers as removed")
+            }
+            emitWarnings(report)
+        }
+    }
+}
+
+struct SnapshotListCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "list", abstract: "List saved snapshots, newest first.")
+
+    @Flag(name: .customLong("json"), help: "machine-readable list")
+    var json = false
+
+    mutating func run() throws {
+        let entries = InventorySnapshotStore(home: NSHomeDirectory()).list()
+        if json {
+            print(try JSONRenderer.encode(entries))
+        } else if entries.isEmpty {
+            print("no snapshots — `launchkeeper snapshot` saves one")
+        } else {
+            for entry in entries {
+                let flags = entry.incomplete ? " (incomplete)" : ""
+                print("\(entry.createdAt)  \(entry.itemCount) items  v\(entry.version)\(flags)  "
+                    + (entry.name.map { $0 + "  " } ?? "") + entry.file)
+            }
+        }
+    }
+}
+
+struct DiffCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "diff",
+        abstract: """
+        What changed since a snapshot (V0.6).
+
+        Compares a saved snapshot (default: the latest) with a fresh scan —
+        or two snapshots — by entry key: added, removed, and changed
+        configuration (enabled, path, executable, signature, origin,
+        control, schedule, listening …). Running/loaded state only with
+        --state. Apple internals hidden unless --all.
+        """)
+
+    @Argument(help: "snapshot file, file name or name (default: the latest snapshot)")
+    var before: String?
+    @Argument(help: "second snapshot to compare against instead of a fresh scan")
+    var after: String?
+    @Flag(name: .customLong("state"), help: "also compare loaded/running state")
+    var state = false
+    @Flag(name: .customLong("all"), help: "include Apple internals")
+    var all = false
+    @Flag(name: .customLong("json"), help: "machine-readable diff")
+    var json = false
+    @Flag(name: .customLong("exit-code"), help: "exit 1 when there are differences (for scripts)")
+    var exitCode = false
+
+    mutating func run() throws {
+        let store = InventorySnapshotStore(home: NSHomeDirectory())
+        guard let beforePath = store.resolve(before) else {
+            throw ValidationError(before.map { "snapshot not found: \($0)" }
+                ?? "no snapshots yet — `launchkeeper snapshot` saves one")
+        }
+        let beforeSnapshot = try store.load(path: beforePath)
+        let afterItems: [BackgroundItem]
+        let afterLabel: String
+        var report: ScanReport?
+        if let after {
+            guard let afterPath = store.resolve(after) else { throw ValidationError("snapshot not found: \(after)") }
+            afterItems = try store.load(path: afterPath).items
+            afterLabel = (afterPath as NSString).lastPathComponent
+        } else {
+            let scan = runScan()
+            report = scan
+            afterItems = scan.items
+            afterLabel = "now"
+        }
+        let diff = InventoryDiff.compare(before: beforeSnapshot.items, after: afterItems, includeState: state,
+                                         beforeLabel: (beforePath as NSString).lastPathComponent, afterLabel: afterLabel)
+            .filtered(includeAll: all)
+        if json {
+            print(try JSONRenderer.encode(diff))
+        } else {
+            print(diff.renderText())
+            if let report {
+                if !report.incompleteLayers.isEmpty {
+                    print("note: this scan is incomplete (\(report.incompleteLayers.joined(separator: ", "))) — "
+                        + "entries of those layers show as removed, and entries that merge with them "
+                        + "(BTM + pluginkit) may change their key; run again when the layer answers")
+                }
+                emitWarnings(report)
+            }
+        }
+        if exitCode, !diff.isEmpty { throw ExitCode(1) }
     }
 }
 
@@ -592,7 +727,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.6.0).
+        Background-service inventory + app correlation + gated remediation (V0.6.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -601,8 +736,9 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.6.0",
+        version: "0.6.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
+                      SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

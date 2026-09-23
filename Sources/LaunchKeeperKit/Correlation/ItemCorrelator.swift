@@ -395,12 +395,20 @@ public struct ItemCorrelator {
         // ---- Pass 7: scheduled work outside launchd — cron, at, pmset,
         // periodic. Each is its own item; a cron command with an absolute
         // path is the executable (so "executable missing" applies).
+        // Keys carry no pid, index or line number (V0.6.1): a snapshot diff
+        // must find the same entry again. Twins get "#2", "#3" ….
+        func uniqueKey(_ base: String) -> String {
+            guard accum[base] != nil else { return base }
+            var n = 2
+            while accum[base + "#\(n)"] != nil { n += 1 }
+            return base + "#\(n)"
+        }
         func firstExecutable(_ command: String) -> String? {
             guard let token = command.split(separator: " ").first.map(String.init) else { return nil }
             return token.hasPrefix("/") ? token : nil
         }
         for entry in input.scheduled.cron {
-            let key = "cron:\(entry.user):\(entry.source):\(entry.line)"
+            let key = uniqueKey("cron:\(entry.user):\(entry.source):\(entry.command)")
             let isUser = entry.source == "crontab"
             var item = BackgroundItem(key: key, displayName: entry.command.count > 72
                                         ? String(entry.command.prefix(69)) + "..." : entry.command,
@@ -430,7 +438,7 @@ public struct ItemCorrelator {
             accum[key] = item
         }
         for event in input.scheduled.powerEvents {
-            let key = "pmset:\(event.index):\(event.owner)"
+            let key = uniqueKey("pmset:\(event.owner):\(event.kind)")
             var item = BackgroundItem(key: key, displayName: event.owner, type: .powerEvent,
                                       owner: "root", uid: 0, domain: .system, enabled: true, category: .scheduled)
             item.metadata["schedule"] = "\(event.kind) at \(event.when)"
@@ -559,7 +567,7 @@ public struct ItemCorrelator {
         }
         var networkKeyByExecutable: [String: String] = [:]
         for process in input.network.processes {
-            let key = "net:\(process.executable ?? process.command):\(process.pid)"
+            let key = uniqueKey("net:" + (process.executable ?? process.command))
             let isRoot = process.user == "root"
             let listening = process.sockets.map { socket -> String in
                 var text = "\(socket.proto)/\(socket.port.map(String.init) ?? socket.address)"
