@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.1)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.2)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -210,6 +210,8 @@ launchkeeper snapshot list                    #   launchkeeper/inventory/<timest
 launchkeeper diff                             # what changed since the latest snapshot: added, removed,
 launchkeeper diff before-upgrade --exit-code  #   changed configuration; exit 1 on differences (scripts)
 launchkeeper diff <older> <newer> --json      # two snapshots against each other
+launchkeeper inspect 07 --verify              # signature in depth: seal (codesign --verify --strict), authority
+                                              #   chain, hardened runtime, Gatekeeper/notarization (spctl), SHA-256
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -504,6 +506,23 @@ origin, package, install date, flags, orphan reasons, control), quoted
 where needed; `list --markdown` renders a table for a report. Both honour
 the usual filters.
 
+## Signature in depth (V0.6.2)
+
+`inspect <entry> --verify` looks at one executable (or bundle) the way a
+reviewer would: `codesign --verify --strict` says whether the seal still
+holds — a modified app reports "a sealed resource is missing or invalid" —
+then the identifier, Team ID, format, timestamp, CDHash, whether the
+hardened runtime is on, whether the signature is ad-hoc, and the whole
+authority chain leaf first. `spctl --assess` gives Gatekeeper's verdict
+with its source ("Notarized Developer ID", "no usable signature" …);
+bundles are assessed for execution, bare binaries against the install
+policy, because the execute policy calls a binary "not an app". Last the
+SHA-256 of the executable (a bundle's main executable), for checking
+against a vendor's published hash or a scanner of your choice — nothing is
+uploaded anywhere. The whole block is in `--json` too. This stays per
+entry on purpose: `spctl` costs a third of a second per path and its
+verdicts are worth reading, not summarizing.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -640,6 +659,9 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.6.2** ✅ — `inspect --verify`: seal check, authority chain,
+  hardened runtime, Gatekeeper/notarization verdict, SHA-256 — V0.6 is
+  complete
 - **V0.6.1** ✅ — `snapshot` / `snapshot list`, `diff` by stable entry
   key (added, removed, changed fields; `--state`, `--exit-code`, `--json`,
   two snapshots), `list --csv` and `list --markdown`

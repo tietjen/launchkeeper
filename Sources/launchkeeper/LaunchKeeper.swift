@@ -247,6 +247,14 @@ struct InspectCommand: ParsableCommand {
     var id: String
     @Flag(name: .customLong("json"), help: "JSON output")
     var json = false
+    @Flag(name: .customLong("verify"),
+          help: "verify the signature in depth: codesign --verify --strict, the authority chain, spctl (notarization), SHA-256 (V0.6)")
+    var verify = false
+
+    private struct Inspection: Codable {
+        var item: BackgroundItem
+        var verification: SignatureVerification?
+    }
 
     mutating func run() throws {
         let env = ScanEnvironment()
@@ -269,10 +277,22 @@ struct InspectCommand: ParsableCommand {
         case 0:
             throw ValidationError("no entry matches '\(id)' — start with `launchkeeper list`")
         case 1:
+            let item = candidates[0]
+            var verification: SignatureVerification?
+            if verify {
+                let bundleTypes: Set<ItemType> = [.systemExtension, .kernelExtension, .plugin]
+                if let target = item.executable ?? (bundleTypes.contains(item.type) ? item.path : nil) {
+                    verification = SignatureVerifier(runner: env.runner, fileManager: env.fileManager).verify(path: target)
+                }
+            }
             if json {
-                print(try JSONRenderer.encode(candidates[0]))
+                print(try JSONRenderer.encode(verify ? Inspection(item: item, verification: verification)
+                                                     : Inspection(item: item, verification: nil)))
             } else {
-                print(InspectRenderer.render(candidates[0], uid: env.uid))
+                print(InspectRenderer.render(item, uid: env.uid))
+                if verify {
+                    print(verification?.renderText() ?? "  verification: nothing to verify — no executable or bundle on this entry")
+                }
             }
         default:
             let preview = candidates.prefix(6)
@@ -727,7 +747,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.6.1).
+        Background-service inventory + app correlation + gated remediation (V0.6.2).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -736,7 +756,7 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.6.1",
+        version: "0.6.2",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

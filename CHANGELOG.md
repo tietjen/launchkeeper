@@ -5,7 +5,18 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.6.1
+## [Unreleased] — 0.6.2
+
+### Added
+- `inspect <entry> --verify`: the signature in depth for one entry —
+  `codesign --verify --strict` (seal), identifier, Team ID, format,
+  timestamp, CDHash, hardened runtime, ad-hoc flag, the full authority
+  chain, Gatekeeper's verdict and source via `spctl --assess` (execute
+  policy for bundles, install policy for bare binaries), and the SHA-256
+  of the executable (a bundle's main executable). Text block under the
+  inspect output; `--json` wraps item and verification. 3 tests.
+
+## [0.6.1] — 2026-09-23
 
 ### Added
 - `launchkeeper snapshot [save] [--name]` saves the whole inventory as
