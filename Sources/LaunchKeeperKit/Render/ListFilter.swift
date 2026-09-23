@@ -11,6 +11,8 @@ public struct ListFilter {
     public var includeAll = false
     /// V0.5: only this Autoruns-style category.
     public var category: ItemCategory?
+    /// V0.6: only items of this provenance (apple, homebrew, app-store, receipt, manual, unknown).
+    public var origin: ProvenanceKind?
 
     public init() {}
 
@@ -25,6 +27,7 @@ public struct ListFilter {
             if disabledOnly && item.enabled { return false }
             if userOnly && item.domain == .system { return false }
             if systemOnly && item.domain == .user { return false }
+            if let origin, (item.provenance?.kind ?? .unknown) != origin { return false }
             if let category {
                 // The scheduled view is everything that runs on a timer,
                 // launchd timers (launch items with a schedule) included.

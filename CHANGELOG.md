@@ -5,7 +5,25 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.5.7
+## [Unreleased] — 0.6.0
+
+### Added
+- Provenance from package receipts: every scan indexes the non-Apple
+  receipts (`pkgutil --pkgs`, `--pkg-info-plist`, `--files`) and attributes
+  items to packages by plist, executable, bundle or app path. Attributed
+  items carry `origin: receipt` with package id, version and install date
+  (`inspect`, `--json`). Apps on disk that no receipt lists and that have
+  no App Store receipt are `manual` (drag-installed). Apple and Homebrew
+  keep precedence. A failed `pkgutil` is a warning, not incompleteness.
+- `list --origin <kind>` filters by provenance (apple, homebrew, app-store,
+  receipt, manual, unknown).
+- `launchkeeper receipts`: one row per installer package with version,
+  install date, files still on disk vs. missing, and the inventory entries
+  it accounts for; `--missing`, `--all`, `--json`.
+- Signature identifier, Team ID and leaf authority from `codesign -dvvv`
+  are metadata on every checked item. 9 tests.
+
+## [0.5.7] — 2026-09-22
 
 ### Added
 - Shell startup: the user's and the system's shell startup files, the

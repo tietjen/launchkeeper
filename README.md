@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.5.7)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -194,6 +194,13 @@ launchkeeper list --category shell-startup      # ~/.zshrc & co., /etc/zshrc & c
                                      # (line numbers + keywords, never a line), /etc/paths.d entries
 launchkeeper list --category network            # listening processes (lsof) linked to the entry that starts them,
                                      # Application Firewall rules; Apple's daemons with --all
+
+# V0.6 — provenance
+launchkeeper list --origin receipt    # only entries a package receipt accounts for (apple, homebrew,
+                                     # app-store, receipt, manual, unknown)
+launchkeeper list --origin manual     # apps dragged out of a disk image: no receipt, no App Store
+launchkeeper receipts                 # the installer packages behind the inventory: version, install
+                                     # date, files still on disk, the entries they run (--missing, --all)
 launchkeeper background              # System Settings › Login Items & Extensions, rebuilt from
                                      # the inventory: "Open at Login" + "Allow in the Background",
                                      # one row per app/developer with its switch and components
@@ -310,9 +317,10 @@ Every item carries three more dimensions, visible in `inspect` and `--json`:
   locks) or `display-only` with the reason and where the switch lives
   instead (Apple/System territory, Background Task Management leftovers,
   extensions managed by System Settings).
-- **origin** — where it came from, from evidence already in hand: Apple,
-  Homebrew, Mac App Store receipt; package receipts arrive with V0.6.
-  Unknown stays unknown.
+- **origin** — where it came from: Apple, Homebrew, Mac App Store receipt,
+  an installer package receipt (`pkgutil`, with package id, version and
+  install date), or `manual` for an app on disk that no receipt knows.
+  Unknown stays unknown. `list --origin <kind>` filters by it.
 
 `background` rebuilds the System Settings › General › Login Items &
 Extensions pane, verified against the pane itself (V0.5.2):
@@ -437,6 +445,31 @@ like other Apple internals (`--all`). Read-only: the control text names the
 entry to act on and the `socketfilterfw --blockapp` route. A failed `lsof`
 or `socketfilterfw` marks the inventory incomplete.
 
+## Provenance and receipts (V0.6)
+
+Every scan indexes the non-Apple installer receipts `pkgutil --pkgs`
+knows — each package's file list (`pkgutil --files`), version and install
+time (`pkgutil --pkg-info-plist`) — about a second for a typical machine.
+An item whose plist, executable, bundle or app a receipt lists gets
+`origin: receipt` with the package id, version and install date (visible
+in `inspect` and `--json`). An app on disk that no receipt lists and that
+carries no App Store receipt is `manual`: dragged out of a disk image or a
+zip — the origin that leaves no uninstaller behind. Apple and Homebrew
+still win by label and path, so a Homebrew formula that also ran an
+installer stays Homebrew. If `pkgutil` does not answer, provenance falls
+back to what the paths say; nothing is marked incomplete, because receipts
+enrich the inventory rather than contribute entries.
+
+`launchkeeper receipts` turns the index around: one row per package with
+version, install date, how many of its files are still on disk (`MISSING`
+counts the ones that are gone) and the inventory entries attributed to it.
+`--missing` keeps only half-removed packages, `--all` includes Apple's.
+This is the ground for V0.8's receipt-based uninstall: what a package put
+where, and how much of it a manual deletion left behind.
+
+Signature details that `codesign -dvvv` already reports — identifier,
+Team ID and the leaf authority — are now metadata on every checked item.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -451,6 +484,7 @@ or `socketfilterfw` marks the inventory incomplete.
     plugin directories       ──┤
     shell startup files      ──┤
     lsof + socketfilterfw    ──┤
+    pkgutil receipts (V0.6)  ──┤
     codesign -dvvv           ──┘  BackgroundItem ──→ table / JSON
     .app Info.plist + mdfind ────┘  (V0.4 app context: parent app,
                                      Spotlight confirmation)
@@ -572,6 +606,11 @@ orphans).
   get their own orphan reason, low confidence and a `LEFTOVER` flag instead
   of posing as open "executable missing" work items right after a clean
   `remove`
+- **V0.6.0** ✅ — provenance from package receipts (`pkgutil` index per
+  scan: package id, version, install date on every attributed item;
+  `manual` for drag-installed apps), `list --origin`, `receipts` with
+  files-still-on-disk counts, signature identifier/Team ID/authority as
+  metadata
 - **V0.5.7** ✅ — shell startup files with sourced files, PATH additions
   and launch hints (never a line's content), and network: listening
   processes linked to the entry that starts them, Application Firewall

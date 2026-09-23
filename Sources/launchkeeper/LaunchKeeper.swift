@@ -62,8 +62,18 @@ struct ListCommand: ParsableCommand {
             help: ArgumentHelp("only this category: "
                                + ItemCategory.allCases.map(\.rawValue).joined(separator: ", ")))
     var category: String?
+    @Option(name: .customLong("origin"),
+            help: ArgumentHelp("only this provenance: apple, homebrew, app-store, receipt, manual, unknown"))
+    var origin: String?
+    private var originFilter: ProvenanceKind?
 
     mutating func run() throws {
+        if let origin {
+            guard let parsed = ProvenanceKind(rawValue: origin) else {
+                throw ValidationError("unknown origin '\(origin)' — one of: apple, homebrew, app-store, receipt, manual, unknown")
+            }
+            originFilter = parsed
+        }
         let userOnly = user && !system
         let systemOnly = system && !user
         var filter = ListFilter()
@@ -73,6 +83,7 @@ struct ListCommand: ParsableCommand {
         filter.userOnly = userOnly
         filter.systemOnly = systemOnly
         filter.includeAll = all
+        filter.origin = originFilter
         if let category {
             guard let parsed = ItemCategory(rawValue: category) else {
                 throw ValidationError("unknown category '\(category)' — one of: "
@@ -199,6 +210,37 @@ struct BackgroundCommand: ParsableCommand {
     mutating func run() throws {
         let report = runScan()
         let view = BackgroundView.build(from: report)
+        if json {
+            print(try JSONRenderer.encode(view))
+        } else {
+            print(view.renderText())
+            emitWarnings(report)
+        }
+    }
+}
+
+struct ReceiptsCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "receipts",
+        abstract: """
+        Package receipts behind the inventory (read-only, V0.6).
+
+        One row per installer package pkgutil knows: version, install date,
+        how many of its files are still on disk, and the inventory entries
+        attributed to it. Apple's own packages with --all.
+        """)
+
+    @Flag(name: .customLong("json"), help: "machine-readable view")
+    var json = false
+    @Flag(name: .customLong("all"), help: "include Apple's packages")
+    var all = false
+    @Flag(name: .customLong("missing"), help: "only receipts with missing files")
+    var missing = false
+
+    mutating func run() throws {
+        let report = runScan()
+        var view = ReceiptsView.build(from: report, includeApple: all)
+        if missing { view.rows = view.rows.filter { $0.missingFiles > 0 } }
         if json {
             print(try JSONRenderer.encode(view))
         } else {
@@ -550,7 +592,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.5.7).
+        Background-service inventory + app correlation + gated remediation (V0.6.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -559,8 +601,8 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.5.7",
-        subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self,
+        version: "0.6.0",
+        subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,

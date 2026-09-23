@@ -28,13 +28,16 @@ public struct ScanOptions: Sendable {
     public var scanShell: Bool
     /// Listening sockets (lsof) and Application Firewall rules (V0.5.7).
     public var scanNetwork: Bool
+    /// Package receipts via pkgutil for provenance (V0.6). Enrichment only.
+    public var scanReceipts: Bool
     public init(includeUser: Bool = true, includeSystem: Bool = true,
                 scanBTM: Bool = true, scanSignatures: Bool = true, scanExtensions: Bool = true,
                 scanSystemExtensions: Bool = true, scanHelpers: Bool = true,
                 scanScheduled: Bool = true, scanLegacy: Bool = true, scanPlugins: Bool = true,
-                scanShell: Bool = true, scanNetwork: Bool = true) {
+                scanShell: Bool = true, scanNetwork: Bool = true, scanReceipts: Bool = true) {
         self.scanShell = scanShell
         self.scanNetwork = scanNetwork
+        self.scanReceipts = scanReceipts
         self.includeUser = includeUser
         self.includeSystem = includeSystem
         self.scanBTM = scanBTM
@@ -61,6 +64,8 @@ public struct ScanReport {
     /// (V0.4.5). Sources that only enrich (print-disabled, codesign, mdfind)
     /// are not listed: they never change the item set.
     public var incompleteLayers: [String]
+    /// V0.6: the package receipt index, when pkgutil answered.
+    public var receiptIndex: ReceiptIndex?
     /// App / developer rows of Background Task Management (V0.5).
     public var btmContainers: [BTMContainer]
     public init(items: [BackgroundItem], uncorrelated: [String],
@@ -325,6 +330,9 @@ public struct ScanCoordinator {
                 guard let exec = item.executable ?? bundle, !exec.isEmpty else { continue }
                 let record = signatures.status(for: exec, runner: env.runner)
                 enriched[index].codeSignatureStatus = record.status
+                if let id = record.identifier { enriched[index].metadata["signature-identifier"] = id }
+                if let team = record.teamIdentifier { enriched[index].metadata["signature-team"] = team }
+                if let authority = record.authority0 { enriched[index].metadata["signature-authority"] = authority }
                 enriched[index].sources.append(SourceEvidence(
                     kind: .signature, detail: "\(record.status): \(record.path)", confidence: .high))
             }
@@ -355,14 +363,27 @@ public struct ScanCoordinator {
         ControlAnalyzer(fileManager: env.fileManager,
                         launchDirs: BackupEnvironment(fileManager: env.fileManager, home: env.home).launchDirs)
             .apply(to: &analyzed)
-        ProvenanceResolver(fileManager: env.fileManager).apply(to: &analyzed)
+        // ---- Stage 6b: package receipts (V0.6). Enrichment: a failed
+        // pkgutil leaves provenance at what the paths say.
+        var receiptIndex: ReceiptIndex?
+        if options.scanReceipts {
+            let receipts = ReceiptScanner(runner: env.runner).scan()
+            checks.append(contentsOf: receipts.checks)
+            warnings.append(contentsOf: receipts.warnings)
+            if !receipts.failed { receiptIndex = receipts.index }
+        } else {
+            checks.append("pkgutil: skipped")
+        }
+        ProvenanceResolver(fileManager: env.fileManager, receipts: receiptIndex).apply(to: &analyzed)
 
         let orphanCount = analyzed.filter { $0.orphaned }.count
         checks.append("\(analyzed.count) items, \(orphanCount) orphaned, "
             + "\(uncorrelated.count) BTM entries uncorrelated")
 
-        return ScanReport(items: analyzed, uncorrelated: uncorrelated,
+        var report = ScanReport(items: analyzed, uncorrelated: uncorrelated,
                           warnings: warnings, checks: checks, incompleteLayers: incomplete,
                           btmContainers: containers)
+        report.receiptIndex = receiptIndex
+        return report
     }
 }

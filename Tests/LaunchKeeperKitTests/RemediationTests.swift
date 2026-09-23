@@ -396,7 +396,7 @@ final class RemediationEngineTests: XCTestCase {
     }
 
     private let userOnly = ScanOptions(includeUser: true, includeSystem: false,
-                                       scanBTM: false, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false)
+                                       scanBTM: false, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false, scanReceipts: false)
 
     func testDryRunReadsOnly() throws {
         let home = try makeUserHome(withPlists: ["com.example.script"])
@@ -829,7 +829,7 @@ final class RemediationIdConsistencyTests: XCTestCase {
     }
 
     private let withBTM = ScanOptions(includeUser: true, includeSystem: false,
-                                      scanBTM: true, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false)
+                                      scanBTM: true, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false, scanReceipts: false)
 
     func testDefaultRemediationScanIncludesTheBTMLayer() {
         XCTAssertTrue(RemediationEngine.defaultScanOptions.scanBTM)
@@ -885,7 +885,7 @@ final class IncompleteInventoryIdGuardTests: XCTestCase {
     }
 
     private let withBTM = ScanOptions(includeUser: true, includeSystem: false,
-                                      scanBTM: true, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false)
+                                      scanBTM: true, scanSignatures: false, scanExtensions: false, scanSystemExtensions: false, scanHelpers: false, scanScheduled: false, scanLegacy: false, scanPlugins: false, scanShell: false, scanNetwork: false, scanReceipts: false)
 
     private func engine(home: String, btmTimesOut: Bool) -> RemediationEngine {
         RemediationEngine(environment: RemediationEnvironment(runner: makeRunner(btmTimesOut: btmTimesOut),

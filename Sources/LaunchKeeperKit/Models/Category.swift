@@ -80,9 +80,18 @@ public struct Provenance: Codable, Equatable, Sendable {
     public var kind: ProvenanceKind
     /// Evidence in one line (label prefix, receipt path, package id …).
     public var detail: String?
+    /// V0.6: the package receipt behind it, when there is one.
+    public var packageIdentifier: String?
+    public var version: String?
+    /// ISO 8601 date of the receipt's install-time.
+    public var installedAt: String?
 
-    public init(kind: ProvenanceKind, detail: String? = nil) {
+    public init(kind: ProvenanceKind, detail: String? = nil, packageIdentifier: String? = nil,
+                version: String? = nil, installedAt: String? = nil) {
         self.kind = kind
         self.detail = detail
+        self.packageIdentifier = packageIdentifier
+        self.version = version
+        self.installedAt = installedAt
     }
 }

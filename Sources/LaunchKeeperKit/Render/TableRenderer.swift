@@ -111,6 +111,10 @@ public enum InspectRenderer {
         }
         if let origin = item.provenance {
             lines.append("  origin:    \(origin.kind.rawValue)" + (origin.detail.map { " (\($0))" } ?? ""))
+            if let package = origin.packageIdentifier {
+                lines.append("  package:   \(package)" + (origin.version.map { " \($0)" } ?? "")
+                    + (origin.installedAt.map { " — installed \($0)" } ?? ""))
+            }
         }
 
         if let path = item.path { lines.append("  path:      \(path)") }
