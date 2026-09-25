@@ -29,7 +29,9 @@ public enum RemediationGate {
         switch item.controlMechanism {
         case .pluginkit:
             return evaluatePluginKit(operation: operation, item: item)
-        case .cron, .loginHook, .firewall:
+        case .cron:
+            return evaluateCron(operation: operation, item: item)
+        case .loginHook, .firewall:
             return .denied(reason: "\(item.controlMechanism!.rawValue) control is not wired up yet")
         case .launchd, nil:
             break
@@ -84,6 +86,23 @@ public enum RemediationGate {
         }
         if let path = item.path, PathUtils.canonicalize(path).hasPrefix("/System") {
             return .denied(reason: "extension inside /System — refused even with --apply")
+        }
+        return .allowed
+    }
+
+    /// cron (V0.7): only the user's OWN crontab, one line at a time, commented
+    /// out behind a marker — never deleted. /etc/crontab and root tables are
+    /// not ours to edit (and not readable without sudo anyway).
+    static func evaluateCron(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
+        guard operation != .remove else {
+            return .denied(reason: "cron entry — launchkeeper comments lines out (disable), it never deletes them")
+        }
+        guard item.path == nil, item.metadata["cron-source"]?.hasPrefix("crontab -l") == true else {
+            return .denied(reason: "system cron table (\(item.path ?? "unknown")) — only the user's own crontab "
+                + "is edited; change this one by hand with sudo")
+        }
+        guard item.metadata["cron-schedule"] != nil, item.metadata["cron-command"] != nil else {
+            return .denied(reason: "cron entry without schedule/command evidence — scan again")
         }
         return .allowed
     }

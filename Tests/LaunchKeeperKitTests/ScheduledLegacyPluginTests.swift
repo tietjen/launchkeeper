@@ -211,7 +211,9 @@ final class ScheduledLegacyPluginCorrelationTests: XCTestCase {
         XCTAssertEqual(gone.metadata["schedule"], "cron 0 3 * * *")
         XCTAssertTrue(gone.orphaned)
         XCTAssertTrue(gone.orphanReasons.contains { $0.hasPrefix("executable missing: /opt/gone/run.sh") }, "\(gone.orphanReasons)")
-        XCTAssertEqual(gone.control?.level, .displayOnly)
+        // V0.7.0: user-crontab lines are switchable (comment out / back in).
+        XCTAssertEqual(gone.control?.level, .reversible)
+        XCTAssertEqual(gone.control?.mechanism, .cron)
         let echo = try XCTUnwrap(items.first { $0.key == "cron:alice:crontab:echo up" })
         XCTAssertNil(echo.executable, "relative commands are not resolvable")
         XCTAssertFalse(echo.orphaned)

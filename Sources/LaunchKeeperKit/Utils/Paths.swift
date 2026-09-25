@@ -22,6 +22,11 @@ public enum LaunchKeeperPaths {
     public static func btmSnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/btm-snapshots"
     }
+    /// V0.7: copies of config sources (crontab, loginwindow plists) taken
+    /// right before launchkeeper changes them.
+    public static func configSnapshots(home: String) -> String {
+        home + "/Library/Application Support/\(productName)/config-snapshots"
+    }
     /// V0.6.1: whole-inventory snapshots for `diff`.
     public static func inventorySnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/inventory"

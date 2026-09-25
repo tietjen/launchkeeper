@@ -16,6 +16,8 @@ public struct RemediationEnvironment {
     /// Prefixes whose file operations route through the interactive sudo seam.
     public var systemDirPrefixes: [String]
     public var backupsRoot: String
+    /// V0.7: where crontab / loginwindow snapshots go.
+    public var configSnapshotsRoot: String
 
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
@@ -23,7 +25,8 @@ public struct RemediationEnvironment {
                 uid: Int = -1,
                 launchDirs: [String]? = nil,
                 systemDirPrefixes: [String]? = nil,
-                backupsRoot: String? = nil) {
+                backupsRoot: String? = nil,
+                configSnapshotsRoot: String? = nil) {
         let defaults = BackupEnvironment(fileManager: fileManager, home: home)
         self.runner = runner
         self.fileManager = fileManager
@@ -32,6 +35,7 @@ public struct RemediationEnvironment {
         self.launchDirs = launchDirs ?? defaults.launchDirs
         self.systemDirPrefixes = systemDirPrefixes ?? defaults.systemDirPrefixes
         self.backupsRoot = backupsRoot ?? defaults.backupsRoot
+        self.configSnapshotsRoot = configSnapshotsRoot ?? LaunchKeeperPaths.configSnapshots(home: home)
     }
 }
 
@@ -87,8 +91,11 @@ public struct RemediationExecutor {
         self.interactiveTimeout = interactiveTimeout
     }
 
+    /// `expectation` is what a config source must read back as afterwards
+    /// (V0.7: the edited crontab) — verification compares against it.
     public func execute(_ plan: [PlannedCommand], operation: RemediationOperation,
-                        item: BackgroundItem) -> (status: RemediationStatus, executed: [String], messages: [String]) {
+                        item: BackgroundItem, expectation: String? = nil)
+        -> (status: RemediationStatus, executed: [String], messages: [String]) {
         var executed: [String] = []
         var messages: [String] = []
 
@@ -112,13 +119,15 @@ public struct RemediationExecutor {
             }
         }
 
-        if let failure = verify(operation: operation, item: item, executed: executed) {
+        if let failure = verify(operation: operation, item: item, executed: executed, expectation: expectation) {
             messages.append("executed, but verification failed: \(failure)")
             return (.appliedFailed(failure), executed, messages)
         }
         switch item.controlMechanism {
         case .pluginkit:
             messages.append("verified: election visible in pluginkit")
+        case .cron:
+            messages.append("verified: crontab -l reads back exactly the edited table")
         default:
             messages.append(operation == .remove
                             ? "verified: file gone and launchd state consistent"
@@ -129,11 +138,17 @@ public struct RemediationExecutor {
 
     /// Verification reads only — never writes.
     private func verify(operation: RemediationOperation, item: BackgroundItem,
-                        executed: [String]) -> String? {
+                        executed: [String], expectation: String?) -> String? {
         switch item.controlMechanism {
         case .pluginkit:
             return verifyPluginKit(operation: operation, item: item)
-        case .cron, .loginHook, .firewall:
+        case .cron:
+            guard let expectation else { return "no expected crontab to verify against" }
+            let installed = runner.run(command: "/usr/bin/crontab", arguments: ["-l"], timeout: stepTimeout)
+            guard installed.exitCode == 0 else { return "crontab -l failed (exit \(installed.exitCode))" }
+            return CronEditor.sameTable(installed.stdout, expectation)
+                ? nil : "the installed crontab differs from the edited table"
+        case .loginHook, .firewall:
             return "no verification for \(item.controlMechanism!.rawValue) yet"
         case .launchd, nil:
             break
@@ -300,6 +315,32 @@ public struct RemediationEngine {
             case .allowed:
                 var messages: [String] = []
 
+                // Config-file switches (V0.7): the plan depends on the source
+                // as it reads NOW, and --apply snapshots it before the write.
+                if item.controlMechanism == .cron {
+                    switch prepareCron(operation: operation, item: item, apply: apply, undo: undo) {
+                    case .failure(let refusal):
+                        return finish(.refused(refusal.reason), target: target,
+                                      messages: ["refused: \(refusal.reason)"], undo: undo)
+                    case .success(let prepared):
+                        guard apply else {
+                            return finish(.planned, target: target,
+                                          messages: prepared.messages + ["dry-run: nothing executed (add --apply to execute)"],
+                                          plan: prepared.plan, undo: prepared.undo)
+                        }
+                        if let snapshot = prepared.snapshot {
+                            audit.append(operation: "snapshot", target: snapshot.name,
+                                         status: "pre-\(operation.rawValue)")
+                        }
+                        let executor = RemediationExecutor(runner: environment.runner, uid: environment.uid,
+                                                           fileManager: environment.fileManager)
+                        let outcome = executor.execute(prepared.plan, operation: operation, item: item,
+                                                       expectation: prepared.expectation)
+                        return finish(outcome.status, target: target, messages: prepared.messages + outcome.messages,
+                                      plan: prepared.plan, executed: outcome.executed, undo: prepared.undo)
+                    }
+                }
+
                 // Remove-specific half of the gate + the runtime precondition.
                 // Refused here means: not a launch plist, outside the four
                 // directories, symlink escape, not orphaned, or file already
@@ -361,6 +402,65 @@ public struct RemediationEngine {
                               plan: plan, executed: outcome.executed, undo: undoText)
             }
         }
+    }
+
+    /// A config-source plan, ready to show (dry-run) or run (--apply).
+    struct PreparedConfigPlan {
+        var plan: [PlannedCommand]
+        var messages: [String]
+        var undo: String?
+        /// What the source must read back as after the change.
+        var expectation: String?
+        var snapshot: ConfigSnapshot?
+    }
+
+    /// cron (V0.7): read the table as it is NOW (the scan may be minutes old),
+    /// edit one line, and — only with --apply — snapshot the whole table and
+    /// stage the edited copy next to it. `crontab <file>` installs it as the
+    /// user, no sudo; verification reads `crontab -l` back.
+    func prepareCron(operation: RemediationOperation, item: BackgroundItem, apply: Bool,
+                     undo: String?) -> Result<PreparedConfigPlan, ControlRefusal> {
+        let current = environment.runner.run(command: "/usr/bin/crontab", arguments: ["-l"], timeout: 20)
+        guard current.exitCode == 0 else {
+            return .failure(ControlRefusal("cannot read the crontab (crontab -l exit \(current.exitCode))"))
+        }
+        let edited: CronEditor.Edit
+        switch CronEditor.edit(current.stdout, schedule: item.metadata["cron-schedule"] ?? "",
+                               command: item.metadata["cron-command"] ?? "", operation: operation) {
+        case .failure(let refusal): return .failure(refusal)
+        case .success(let value): edited = value
+        }
+        var newText = edited.newText
+        if !newText.hasSuffix("\n") { newText += "\n" }   // cron skips an unterminated last line
+        let change = operation == .disable
+            ? "comment out line \(edited.lineNumber) behind `\(CronParser.disabledMarker.trimmingCharacters(in: .whitespaces))`"
+            : "take the launchkeeper marker off line \(edited.lineNumber)"
+        let describe = "install the edited table — \(change); every other line stays byte-identical"
+
+        guard apply else {
+            return .success(PreparedConfigPlan(
+                plan: [PlannedCommand(command: "/usr/bin/crontab", arguments: ["<snapshot>/crontab.new"],
+                                      description: describe)],
+                messages: ["--apply first saves the whole table (crontab -l) as a snapshot"],
+                undo: undo, expectation: newText, snapshot: nil))
+        }
+        let store = ConfigSnapshotStore(root: environment.configSnapshotsRoot, fileManager: environment.fileManager)
+        let snapshot: ConfigSnapshot
+        switch store.save(label: "pre-cron-\(operation.rawValue)", fileName: "crontab.txt",
+                          contents: Data(current.stdout.utf8), source: "crontab -l (\(item.owner))") {
+        case .failure(let refusal): return .failure(refusal)
+        case .success(let value): snapshot = value
+        }
+        let staged = snapshot.directory + "/crontab.new"
+        guard environment.fileManager.createFile(atPath: staged, contents: Data(newText.utf8)),
+              environment.fileManager.contents(atPath: staged) == Data(newText.utf8) else {
+            return .failure(ControlRefusal("cannot stage the edited table — nothing changed"))
+        }
+        return .success(PreparedConfigPlan(
+            plan: [PlannedCommand(command: "/usr/bin/crontab", arguments: [staged], description: describe)],
+            messages: ["snapshot: \(snapshot.file)"],
+            undo: (undo.map { $0 + "   " } ?? "") + "(full rollback: crontab \(RemediationPlanner.shellQuoted(snapshot.file)))",
+            expectation: newText, snapshot: snapshot))
     }
 
     /// The file-level remove rules live in RemediationGate.evaluateRemove (one

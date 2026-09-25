@@ -416,8 +416,11 @@ public struct ItemCorrelator {
                                       type: .cronJob, path: isUser ? nil : entry.source,
                                       executable: firstExecutable(entry.command),
                                       owner: entry.user, uid: isUser ? input.uid : 0,
-                                      domain: isUser ? .user : .system, enabled: true, category: .scheduled)
+                                      domain: isUser ? .user : .system, enabled: !entry.disabled,
+                                      category: .scheduled)
             item.metadata["schedule"] = "cron " + entry.schedule
+            item.metadata["cron-schedule"] = entry.schedule
+            if entry.disabled { item.metadata["cron-disabled"] = "true" }
             item.metadata["cron-source"] = isUser ? "crontab -l (\(entry.user))" : entry.source
             item.metadata["cron-line"] = String(entry.line)
             item.metadata["cron-command"] = entry.command

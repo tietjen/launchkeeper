@@ -11,8 +11,12 @@ public struct CronEntry: Equatable, Sendable {
     public var line: Int
     public var schedule: String
     public var command: String
-    public init(user: String, source: String, line: Int, schedule: String, command: String) {
+    /// V0.7: commented out by `launchkeeper disable` (marker line) — still
+    /// inventoried, so `enable` can find it again.
+    public var disabled: Bool
+    public init(user: String, source: String, line: Int, schedule: String, command: String, disabled: Bool = false) {
         self.user = user; self.source = source; self.line = line; self.schedule = schedule; self.command = command
+        self.disabled = disabled
     }
 }
 
@@ -51,10 +55,20 @@ public enum CronParser {
     /// are skipped. `@reboot`-style specials keep the token as schedule.
     /// `systemTable` = /etc/crontab layout with a user column after the
     /// five time fields.
+    /// The prefix `launchkeeper disable` puts in front of a user-crontab
+    /// line (V0.7). Only this exact marker counts — an ordinary comment is
+    /// never read as a disabled job.
+    public static let disabledMarker = "#launchkeeper-disabled "
+
     public static func parse(_ text: String, user: String, source: String, systemTable: Bool = false) -> [CronEntry] {
         var entries: [CronEntry] = []
         for (index, raw) in text.components(separatedBy: "\n").enumerated() {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            var disabled = false
+            if !systemTable, line.hasPrefix(disabledMarker) {
+                line = String(line.dropFirst(disabledMarker.count)).trimmingCharacters(in: .whitespaces)
+                disabled = true
+            }
             if line.isEmpty || line.hasPrefix("#") { continue }
             let tokens = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
             guard let first = tokens.first else { continue }
@@ -64,7 +78,7 @@ public enum CronParser {
                 if systemTable, let u = rest.first { owner = u; rest = Array(rest.dropFirst()) }
                 guard !rest.isEmpty else { continue }
                 entries.append(CronEntry(user: owner, source: source, line: index + 1,
-                                         schedule: first, command: rest.joined(separator: " ")))
+                                         schedule: first, command: rest.joined(separator: " "), disabled: disabled))
                 continue
             }
             // VAR=value (no spaces before '=' in the first token)
@@ -74,7 +88,8 @@ public enum CronParser {
             let schedule = tokens[0..<5].joined(separator: " ")
             let owner = systemTable ? tokens[5] : user
             let command = tokens[fieldCount...].joined(separator: " ")
-            entries.append(CronEntry(user: owner, source: source, line: index + 1, schedule: schedule, command: command))
+            entries.append(CronEntry(user: owner, source: source, line: index + 1, schedule: schedule, command: command,
+                                     disabled: disabled))
         }
         return entries
     }

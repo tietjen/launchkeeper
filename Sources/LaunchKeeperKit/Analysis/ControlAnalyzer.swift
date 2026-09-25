@@ -39,8 +39,14 @@ public struct ControlAnalyzer {
                     + "binaries comes with V0.8 cleanup")
         // V0.5.6 scheduled / legacy / plugin directories: read-only for now.
         case .cronJob:
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "cron entry — commenting it out with a backup comes with V0.7; until then `crontab -e`")
+            switch RemediationGate.evaluate(operation: .disable, item: item) {
+            case .denied(let reason):
+                return Controllability(level: .displayOnly, actions: [], reason: reason, mechanism: .cron)
+            case .allowed:
+                return Controllability(level: .reversible, actions: ["disable", "enable"],
+                    reason: "user crontab line — disable comments it out behind a launchkeeper marker, enable "
+                        + "takes the marker off; the whole table is snapshotted first", mechanism: .cron)
+            }
         case .atJob:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "at job — `atrm <job>` removes it; launchkeeper control comes with V0.7")

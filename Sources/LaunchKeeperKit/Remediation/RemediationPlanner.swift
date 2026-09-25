@@ -37,7 +37,10 @@ public enum RemediationPlanner {
         switch item.controlMechanism {
         case .pluginkit:
             return "pluginkit/" + (item.metadata["ext-identifier"] ?? item.key)
-        case .cron, .loginHook, .firewall:
+        case .cron:
+            // Never the command: cron lines carry tokens often enough.
+            return "crontab:\(item.owner):line\(item.metadata["cron-line"] ?? "?")"
+        case .loginHook, .firewall:
             return item.key
         case .launchd, nil:
             break
@@ -165,7 +168,14 @@ public enum RemediationPlanner {
     /// only within one scan run — a hint the user executes later would resolve
     /// to a different entry (and for `remove` the hint IS the recovery path).
     private static func hintAddress(_ item: BackgroundItem) -> String {
-        item.label ?? item.metadata["ext-identifier"] ?? item.key
+        item.label ?? item.metadata["ext-identifier"] ?? item.metadata["cron-command"] ?? item.key
+    }
+
+    /// A hint the user pastes into a shell must survive the paste.
+    static func shellQuoted(_ text: String) -> String {
+        let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./:@%+="))
+        if !text.isEmpty, text.unicodeScalars.allSatisfy({ safe.contains($0) }) { return text }
+        return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     public static func undoHint(for operation: RemediationOperation, item: BackgroundItem) -> String? {
@@ -173,6 +183,13 @@ public enum RemediationPlanner {
         // Undo = back to the PREVIOUS election, exactly. An extension without
         // one ("none") returns with `-e default` — `enable` would elect
         // `use`, a different state (a Finder Sync extension would start).
+        if item.controlMechanism == .cron {
+            switch operation {
+            case .disable: return "launchkeeper enable \(shellQuoted(target))"
+            case .enable: return "launchkeeper disable \(shellQuoted(target))"
+            case .remove, .backup, .restore: return nil
+            }
+        }
         if item.controlMechanism == .pluginkit {
             guard operation == .disable || operation == .enable else { return nil }
             switch item.metadata["ext-election"] ?? "none" {
