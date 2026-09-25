@@ -260,8 +260,11 @@ final class ScheduledLegacyPluginCorrelationTests: XCTestCase {
         XCTAssertTrue(startup.control?.reason.contains("OS X 10.10") == true)
         let hook = try XCTUnwrap(items.first { $0.key == "hook:LoginHook:system" })
         XCTAssertTrue(hook.orphaned, "hook script missing → executable missing")
-        XCTAssertTrue(hook.control?.reason.contains("defaults delete /Library/Preferences/com.apple.loginwindow.plist LoginHook") == true,
-                      hook.control?.reason ?? "-")
+        // V0.7.0: hooks are parked, reversibly (system plist via sudo).
+        XCTAssertEqual(hook.control?.level, .reversible)
+        XCTAssertEqual(hook.control?.mechanism, .loginHook)
+        XCTAssertTrue(hook.control?.reason.contains("LaunchKeeperDisabledLoginHook") == true, hook.control?.reason ?? "-")
+        XCTAssertTrue(hook.control?.reason.contains("via sudo") == true, hook.control?.reason ?? "-")
         let auth = try XCTUnwrap(items.first { $0.key == "plugin:authorization:VendorAuth" })
         XCTAssertEqual(auth.category, .pluginDirectories)
         XCTAssertFalse(auth.loaded)

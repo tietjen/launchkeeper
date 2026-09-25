@@ -84,12 +84,17 @@ public struct ScanEnvironment {
     public var fileManager: FileManager
     public var home: String
     public var uid: Int
+    /// Tests point the legacy stage at temp loginwindow plists (V0.7) —
+    /// nil = the real locations under `home` and /Library.
+    public var legacyScanner: LegacyScanner?
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
                 home: String = NSHomeDirectory(),
-                uid: Int = Int(getuid())) {
+                uid: Int = Int(getuid()),
+                legacyScanner: LegacyScanner? = nil) {
         self.runner = runner; self.fileManager = fileManager
         self.home = home; self.uid = uid
+        self.legacyScanner = legacyScanner
     }
 }
 
@@ -264,7 +269,7 @@ public struct ScanCoordinator {
         // ---- Stage 3f: legacy persistence. File reads only.
         var legacy = LegacyScanner.Result()
         if options.scanLegacy {
-            legacy = LegacyScanner(fileManager: env.fileManager, home: env.home).scan()
+            legacy = (env.legacyScanner ?? LegacyScanner(fileManager: env.fileManager, home: env.home)).scan()
             checks.append(contentsOf: legacy.checks)
             warnings.append(contentsOf: legacy.warnings)
         } else {

@@ -473,8 +473,9 @@ public struct ItemCorrelator {
             var item = BackgroundItem(key: key, displayName: "\(hook.kind) → \(hook.script)", type: .loginHook,
                                       path: hook.source, executable: hook.script,
                                       owner: isUser ? "user" : "root", uid: isUser ? input.uid : 0,
-                                      domain: hook.domain, enabled: true, category: .legacy)
+                                      domain: hook.domain, enabled: !hook.disabled, category: .legacy)
             item.metadata["hook-kind"] = hook.kind
+            if hook.disabled { item.metadata["hook-disabled"] = "true" }
             markDomain(&item, isUser)
             item.sources.append(SourceEvidence(kind: .legacy, detail: "\(hook.kind) in \(hook.source)", confidence: .high))
             accum[key] = item

@@ -31,7 +31,9 @@ public enum RemediationGate {
             return evaluatePluginKit(operation: operation, item: item)
         case .cron:
             return evaluateCron(operation: operation, item: item)
-        case .loginHook, .firewall:
+        case .loginHook:
+            return evaluateLoginHook(operation: operation, item: item)
+        case .firewall:
             return .denied(reason: "\(item.controlMechanism!.rawValue) control is not wired up yet")
         case .launchd, nil:
             break
@@ -103,6 +105,31 @@ public enum RemediationGate {
         }
         guard item.metadata["cron-schedule"] != nil, item.metadata["cron-command"] != nil else {
             return .denied(reason: "cron entry without schedule/command evidence — scan again")
+        }
+        return .allowed
+    }
+
+    /// loginwindow hooks (V0.7): exactly the two loginwindow plists the
+    /// scanner reads, exactly the two keys. The value is parked, never lost.
+    static func evaluateLoginHook(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
+        guard operation != .remove else {
+            return .denied(reason: "loginwindow hook — disable parks it (reversible); deleting the hook "
+                + "script itself comes with V0.8 cleanup")
+        }
+        guard let kind = item.metadata["hook-kind"], kind == "LoginHook" || kind == "LogoutHook" else {
+            return .denied(reason: "not a LoginHook/LogoutHook")
+        }
+        // System hooks: exactly /Library/Preferences. User hooks: the same
+        // file name under a home — never /System, never a `..` detour.
+        let systemPlist = "/Library/Preferences/com.apple.loginwindow.plist"
+        guard let path = item.path, !path.contains("/.."),
+              item.domain == .system ? path == systemPlist
+                  : (path.hasSuffix("/Library/Preferences/com.apple.loginwindow.plist")
+                     && path != systemPlist && !path.hasPrefix("/System")) else {
+            return .denied(reason: "hook source is not a loginwindow preferences plist")
+        }
+        guard let script = item.executable, !script.isEmpty else {
+            return .denied(reason: "hook without a script value — nothing to park")
         }
         return .allowed
     }

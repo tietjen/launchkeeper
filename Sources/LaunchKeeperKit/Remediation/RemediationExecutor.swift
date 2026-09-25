@@ -18,6 +18,8 @@ public struct RemediationEnvironment {
     public var backupsRoot: String
     /// V0.7: where crontab / loginwindow snapshots go.
     public var configSnapshotsRoot: String
+    /// Passed through to the resolution scan (tests: temp loginwindow plists).
+    public var legacyScanner: LegacyScanner?
 
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
@@ -26,7 +28,8 @@ public struct RemediationEnvironment {
                 launchDirs: [String]? = nil,
                 systemDirPrefixes: [String]? = nil,
                 backupsRoot: String? = nil,
-                configSnapshotsRoot: String? = nil) {
+                configSnapshotsRoot: String? = nil,
+                legacyScanner: LegacyScanner? = nil) {
         let defaults = BackupEnvironment(fileManager: fileManager, home: home)
         self.runner = runner
         self.fileManager = fileManager
@@ -36,6 +39,7 @@ public struct RemediationEnvironment {
         self.systemDirPrefixes = systemDirPrefixes ?? defaults.systemDirPrefixes
         self.backupsRoot = backupsRoot ?? defaults.backupsRoot
         self.configSnapshotsRoot = configSnapshotsRoot ?? LaunchKeeperPaths.configSnapshots(home: home)
+        self.legacyScanner = legacyScanner
     }
 }
 
@@ -128,6 +132,9 @@ public struct RemediationExecutor {
             messages.append("verified: election visible in pluginkit")
         case .cron:
             messages.append("verified: crontab -l reads back exactly the edited table")
+        case .loginHook:
+            messages.append(operation == .disable ? "verified: defaults shows the hook parked, the live key gone"
+                                                  : "verified: defaults shows the hook live again")
         default:
             messages.append(operation == .remove
                             ? "verified: file gone and launchd state consistent"
@@ -148,7 +155,9 @@ public struct RemediationExecutor {
             guard installed.exitCode == 0 else { return "crontab -l failed (exit \(installed.exitCode))" }
             return CronEditor.sameTable(installed.stdout, expectation)
                 ? nil : "the installed crontab differs from the edited table"
-        case .loginHook, .firewall:
+        case .loginHook:
+            return verifyLoginHook(operation: operation, item: item, script: expectation)
+        case .firewall:
             return "no verification for \(item.controlMechanism!.rawValue) yet"
         case .launchd, nil:
             break
@@ -216,6 +225,26 @@ public struct RemediationExecutor {
 }
 
 extension RemediationExecutor {
+    /// Reads both keys back through `defaults` (cfprefsd's view, which is
+    /// what loginwindow sees): the live key must be gone and the parked one
+    /// hold the script after disable — and the other way round after enable.
+    func verifyLoginHook(operation: RemediationOperation, item: BackgroundItem, script: String?) -> String? {
+        guard let path = item.path, let kind = item.metadata["hook-kind"], let script else {
+            return "no hook evidence to verify"
+        }
+        let domainArgument = path.hasSuffix(".plist") ? String(path.dropLast(6)) : path
+        func read(_ key: String) -> String? {
+            let result = runner.run(command: "/usr/bin/defaults", arguments: ["read", domainArgument, key],
+                                    timeout: stepTimeout)
+            return result.exitCode == 0 ? result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        }
+        let parked = LoginHookRecord.parkedKey(for: kind)
+        let (gone, holds) = operation == .disable ? (kind, parked) : (parked, kind)
+        if read(gone) != nil { return "\(gone) is still set" }
+        guard read(holds) == script else { return "\(holds) does not hold the script path" }
+        return nil
+    }
+
     /// Re-reads the election of every registered version of the identifier —
     /// `-e` applies to all of them, so all of them must show the new state.
     func verifyPluginKit(operation: RemediationOperation, item: BackgroundItem) -> String? {
@@ -266,7 +295,8 @@ public struct RemediationEngine {
         // state and the full id space) but never extends it.
         let scanEnv = ScanEnvironment(runner: environment.runner,
                                       fileManager: environment.fileManager,
-                                      home: environment.home, uid: environment.uid)
+                                      home: environment.home, uid: environment.uid,
+                                      legacyScanner: environment.legacyScanner)
         let report = ScanCoordinator(environment: scanEnv).perform(options: scanOptions)
 
         func finish(_ status: RemediationStatus, target: String, messages: [String],
@@ -317,8 +347,8 @@ public struct RemediationEngine {
 
                 // Config-file switches (V0.7): the plan depends on the source
                 // as it reads NOW, and --apply snapshots it before the write.
-                if item.controlMechanism == .cron {
-                    switch prepareCron(operation: operation, item: item, apply: apply, undo: undo) {
+                if let prepare = configPreparer(for: item) {
+                    switch prepare(operation, item, apply, undo) {
                     case .failure(let refusal):
                         return finish(.refused(refusal.reason), target: target,
                                       messages: ["refused: \(refusal.reason)"], undo: undo)
@@ -412,6 +442,91 @@ public struct RemediationEngine {
         /// What the source must read back as after the change.
         var expectation: String?
         var snapshot: ConfigSnapshot?
+    }
+
+    /// Mechanisms whose plan is built from the config source as it reads
+    /// at run time (and snapshotted with --apply); nil = planner-only.
+    func configPreparer(for item: BackgroundItem)
+        -> ((RemediationOperation, BackgroundItem, Bool, String?) -> Result<PreparedConfigPlan, ControlRefusal>)? {
+        switch item.controlMechanism {
+        case .cron: return prepareCron
+        case .loginHook: return prepareLoginHook
+        default: return nil
+        }
+    }
+
+    /// loginwindow hooks (V0.7): park the value under
+    /// `LaunchKeeperDisabled<kind>` in the SAME plist, then delete the live
+    /// key — in that order, so no failure can lose the script path. Enable
+    /// is the mirror image. `defaults` goes through cfprefsd (a direct file
+    /// write would be overwritten by its cache); the system plist via the
+    /// interactive sudo seam. The whole plist is snapshotted first.
+    func prepareLoginHook(operation: RemediationOperation, item: BackgroundItem, apply: Bool,
+                          undo: String?) -> Result<PreparedConfigPlan, ControlRefusal> {
+        guard let path = item.path, let kind = item.metadata["hook-kind"] else {
+            return .failure(ControlRefusal("hook without source evidence — scan again"))
+        }
+        let parked = LoginHookRecord.parkedKey(for: kind)
+        guard let dict = try? PlistReader.readDictionary(fromFile: path, fileManager: environment.fileManager) else {
+            return .failure(ControlRefusal("cannot read \(path) — nothing changed"))
+        }
+        let live = (dict[kind] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let parkedValue = (dict[parked] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let script: String
+        switch operation {
+        case .disable:
+            guard let value = live else {
+                return .failure(ControlRefusal("\(kind) is not set anymore — scan again"))
+            }
+            guard parkedValue == nil else {
+                return .failure(ControlRefusal("\(parked) already holds a value — resolve by hand, "
+                    + "launchkeeper never overwrites a parked hook"))
+            }
+            script = value
+        case .enable:
+            guard let value = parkedValue else {
+                return .failure(ControlRefusal("no parked \(kind) — nothing to enable"))
+            }
+            guard live == nil else {
+                return .failure(ControlRefusal("\(kind) is set again meanwhile — resolve by hand"))
+            }
+            script = value
+        case .remove, .backup, .restore:
+            return .failure(ControlRefusal("hooks are disabled or enabled, never removed here"))
+        }
+
+        let domainArgument = path.hasSuffix(".plist") ? String(path.dropLast(6)) : path
+        let sudo = item.domain == .system
+        func defaults(_ arguments: [String], _ description: String) -> PlannedCommand {
+            sudo ? PlannedCommand(command: "/usr/bin/sudo", arguments: ["defaults"] + arguments,
+                                  description: description + " — via sudo (interactive password)")
+                 : PlannedCommand(command: "/usr/bin/defaults", arguments: arguments, description: description)
+        }
+        let (from, to) = operation == .disable ? (kind, parked) : (parked, kind)
+        let plan = [
+            defaults(["write", domainArgument, to, "-string", script], "copy the script path to \(to) first"),
+            defaults(["delete", domainArgument, from], "then delete \(from) — loginwindow reads only \(kind)"),
+        ]
+        guard apply else {
+            return .success(PreparedConfigPlan(plan: plan,
+                messages: ["--apply first saves \(path) as a snapshot"],
+                undo: undo, expectation: script, snapshot: nil))
+        }
+        guard let contents = environment.fileManager.contents(atPath: path) else {
+            return .failure(ControlRefusal("cannot read \(path) for the snapshot — nothing changed"))
+        }
+        let store = ConfigSnapshotStore(root: environment.configSnapshotsRoot, fileManager: environment.fileManager)
+        switch store.save(label: "pre-hook-\(operation.rawValue)", fileName: (path as NSString).lastPathComponent,
+                          contents: contents, source: path) {
+        case .failure(let refusal):
+            return .failure(refusal)
+        case .success(let snapshot):
+            let restore = (sudo ? "sudo " : "") + "defaults import \(RemediationPlanner.shellQuoted(domainArgument)) "
+                + RemediationPlanner.shellQuoted(snapshot.file)
+            return .success(PreparedConfigPlan(plan: plan, messages: ["snapshot: \(snapshot.file)"],
+                undo: (undo.map { $0 + "   " } ?? "") + "(full rollback: \(restore))",
+                expectation: script, snapshot: snapshot))
+        }
     }
 
     /// cron (V0.7): read the table as it is NOW (the scan may be minutes old),

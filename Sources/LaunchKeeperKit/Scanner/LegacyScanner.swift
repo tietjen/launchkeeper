@@ -9,9 +9,16 @@ public struct LoginHookRecord: Equatable, Sendable {
     public var script: String
     public var source: String        // the loginwindow plist that sets it
     public var domain: ItemDomain
-    public init(kind: String, script: String, source: String, domain: ItemDomain) {
+    /// V0.7: parked by `launchkeeper disable` under `LaunchKeeperDisabled<kind>`
+    /// — loginwindow ignores it, the inventory still shows it for `enable`.
+    public var disabled: Bool
+    public init(kind: String, script: String, source: String, domain: ItemDomain, disabled: Bool = false) {
         self.kind = kind; self.script = script; self.source = source; self.domain = domain
+        self.disabled = disabled
     }
+
+    /// The key a disabled hook is parked under, in the same plist.
+    public static func parkedKey(for kind: String) -> String { "LaunchKeeperDisabled" + kind }
 }
 
 public struct StartupItemRecord: Equatable, Sendable {
@@ -73,8 +80,16 @@ public struct LegacyScanner {
             guard fileManager.isReadableFile(atPath: plist.path),
                   let dict = try? PlistReader.readDictionary(fromFile: plist.path, fileManager: fileManager) else { continue }
             for kind in ["LoginHook", "LogoutHook"] {
+                let parked = dict[LoginHookRecord.parkedKey(for: kind)] as? String
                 if let script = dict[kind] as? String, !script.isEmpty {
                     result.hooks.append(LoginHookRecord(kind: kind, script: script, source: plist.path, domain: plist.domain))
+                    if parked != nil {
+                        result.warnings.append("\(plist.path): \(kind) is set AND a parked "
+                            + "\(LoginHookRecord.parkedKey(for: kind)) exists — the live one counts")
+                    }
+                } else if let parked, !parked.isEmpty {
+                    result.hooks.append(LoginHookRecord(kind: kind, script: parked, source: plist.path,
+                                                        domain: plist.domain, disabled: true))
                 }
             }
         }

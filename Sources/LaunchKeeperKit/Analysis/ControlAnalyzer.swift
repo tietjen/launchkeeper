@@ -57,9 +57,16 @@ public struct ControlAnalyzer {
             return Controllability(level: .displayOnly, actions: [],
                 reason: "periodic(8) script — removal over the gate comes with V0.8 cleanup")
         case .loginHook:
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "loginwindow hook — `sudo defaults delete \(item.path ?? "com.apple.loginwindow") "
-                    + "\(item.metadata["hook-kind"] ?? "LoginHook")` removes it; gate support comes with V0.8")
+            switch RemediationGate.evaluate(operation: .disable, item: item) {
+            case .denied(let reason):
+                return Controllability(level: .displayOnly, actions: [], reason: reason, mechanism: .loginHook)
+            case .allowed:
+                return Controllability(level: .reversible, actions: ["disable", "enable"],
+                    reason: "loginwindow hook — disable parks the script path under "
+                        + "\(LoginHookRecord.parkedKey(for: item.metadata["hook-kind"] ?? "LoginHook")) in the same "
+                        + "plist (snapshot first\(item.domain == .system ? ", via sudo" : "")), enable puts it back",
+                    mechanism: .loginHook)
+            }
         case .startupItem:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "legacy StartupItem — nothing runs it since OS X 10.10; removal over the gate comes with V0.8")

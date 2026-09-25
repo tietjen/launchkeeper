@@ -40,7 +40,9 @@ public enum RemediationPlanner {
         case .cron:
             // Never the command: cron lines carry tokens often enough.
             return "crontab:\(item.owner):line\(item.metadata["cron-line"] ?? "?")"
-        case .loginHook, .firewall:
+        case .loginHook:
+            return "loginwindow:\(item.domain == .system ? "system" : "user"):\(item.metadata["hook-kind"] ?? "hook")"
+        case .firewall:
             return item.key
         case .launchd, nil:
             break
@@ -183,6 +185,13 @@ public enum RemediationPlanner {
         // Undo = back to the PREVIOUS election, exactly. An extension without
         // one ("none") returns with `-e default` — `enable` would elect
         // `use`, a different state (a Finder Sync extension would start).
+        if item.controlMechanism == .loginHook {
+            switch operation {
+            case .disable: return "launchkeeper enable \(shellQuoted(target))"
+            case .enable: return "launchkeeper disable \(shellQuoted(target))"
+            case .remove, .backup, .restore: return nil
+            }
+        }
         if item.controlMechanism == .cron {
             switch operation {
             case .disable: return "launchkeeper enable \(shellQuoted(target))"
