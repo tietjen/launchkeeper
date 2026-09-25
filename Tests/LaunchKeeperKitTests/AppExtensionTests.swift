@@ -154,9 +154,10 @@ final class AppExtensionScanStageTests: XCTestCase {
         let extensions = report.items.filter { $0.category == .appExtensions }
         XCTAssertEqual(extensions.count, 4, "5 records, one identifier twice: \(extensions.map(\.key))")
         let share = try XCTUnwrap(extensions.first { $0.key == "ext:com.example.app.ShareExt" })
-        XCTAssertEqual(share.control?.level, .displayOnly)
-        XCTAssertTrue(share.control?.reason.contains("pluginkit -e use|ignore -i com.example.app.ShareExt") == true,
-                      share.control?.reason ?? "-")
+        // V0.7.0: the election is switchable through the gate.
+        XCTAssertEqual(share.control?.level, .reversible)
+        XCTAssertEqual(share.control?.mechanism, .pluginkit)
+        XCTAssertTrue(share.control?.reason.contains("pluginkit election") == true, share.control?.reason ?? "-")
         XCTAssertEqual(share.parentApplication, "Example")
     }
 

@@ -279,6 +279,7 @@ public struct ItemCorrelator {
             item.category = .appExtensions
             if let path = ext.path, !(item.path?.hasPrefix("/") ?? false) { item.path = path }
             item.metadata["ext-election"] = ext.election.rawValue
+            item.metadata["ext-identifier"] = ext.identifier
             item.metadata["ext-version"] = ext.version
             if let sdk = ext.sdk { item.metadata["ext-sdk"] = sdk }
             if let name = ext.displayName { item.metadata["ext-display-name"] = name }

@@ -34,6 +34,14 @@ public enum RemediationPlanner {
     /// Audit/display target, e.g. "gui/501/com.example.script" or
     /// "system/de.example.daemon".
     public static func displayTarget(for item: BackgroundItem, uid: Int) -> String {
+        switch item.controlMechanism {
+        case .pluginkit:
+            return "pluginkit/" + (item.metadata["ext-identifier"] ?? item.key)
+        case .cron, .loginHook, .firewall:
+            return item.key
+        case .launchd, nil:
+            break
+        }
         guard let label = item.label else { return item.key }
         return domainTarget(for: item, uid: uid) + "/" + label
     }
@@ -71,6 +79,14 @@ public enum RemediationPlanner {
     public static func plan(operation: RemediationOperation, item: BackgroundItem,
                             uid: Int, now: Bool = false,
                             systemDirPrefixes: [String] = defaultSystemDirPrefixes) -> [PlannedCommand] {
+        switch item.controlMechanism {
+        case .pluginkit:
+            return planPluginKit(operation: operation, item: item)
+        case .cron, .loginHook, .firewall:
+            return []
+        case .launchd, nil:
+            break
+        }
         guard item.label != nil else { return [] }
         let serviceTarget = displayTarget(for: item, uid: uid)
         let domainTarget = domainTarget(for: item, uid: uid)
@@ -125,16 +141,47 @@ public enum RemediationPlanner {
         return commands
     }
 
+    /// V0.7 app extensions: one pluginkit call, per user, no sudo. `-e`
+    /// applies to every registered version of the identifier — the same set
+    /// the inventory folded into this one item.
+    static func planPluginKit(operation: RemediationOperation, item: BackgroundItem) -> [PlannedCommand] {
+        guard let identifier = item.metadata["ext-identifier"] else { return [] }
+        switch operation {
+        case .disable:
+            return [PlannedCommand(command: "/usr/bin/pluginkit", arguments: ["-e", "ignore", "-i", identifier],
+                                   description: "elect 'ignore' — hosts stop loading the extension "
+                                       + "(was: \(item.metadata["ext-election"] ?? "unknown"))")]
+        case .enable:
+            return [PlannedCommand(command: "/usr/bin/pluginkit", arguments: ["-e", "use", "-i", identifier],
+                                   description: "elect 'use' — hosts may load the extension again "
+                                       + "(was: \(item.metadata["ext-election"] ?? "unknown"))")]
+        case .remove, .backup, .restore:
+            return []
+        }
+    }
+
     /// Undo hint shown next to every plan (reversibility over minimalism).
     /// Addressed by LABEL, never by display id: the id is positional and stable
     /// only within one scan run — a hint the user executes later would resolve
     /// to a different entry (and for `remove` the hint IS the recovery path).
     private static func hintAddress(_ item: BackgroundItem) -> String {
-        item.label ?? item.id
+        item.label ?? item.metadata["ext-identifier"] ?? item.key
     }
 
     public static func undoHint(for operation: RemediationOperation, item: BackgroundItem) -> String? {
         let target = hintAddress(item)
+        // Undo = back to the PREVIOUS election, exactly. An extension without
+        // one ("none") returns with `-e default` — `enable` would elect
+        // `use`, a different state (a Finder Sync extension would start).
+        if item.controlMechanism == .pluginkit {
+            guard operation == .disable || operation == .enable else { return nil }
+            switch item.metadata["ext-election"] ?? "none" {
+            case "use": return "launchkeeper enable \(target)"
+            case "ignore": return "launchkeeper disable \(target)"
+            case let previous:
+                return "pluginkit -e default -i \(target)   (previous election: \(previous))"
+            }
+        }
         switch operation {
         case .disable: return "launchkeeper enable \(target)"
         case .enable: return "launchkeeper disable \(target)"

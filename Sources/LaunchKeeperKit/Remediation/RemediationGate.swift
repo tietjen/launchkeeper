@@ -24,6 +24,17 @@ public enum RemediationGate {
     public static func evaluate(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
         guard operation == .disable || operation == .enable || operation == .remove else { return .allowed }
 
+        // V0.7: one gate, one rule set per switch. Every branch is
+        // fail-closed on its own; none of them falls through to another.
+        switch item.controlMechanism {
+        case .pluginkit:
+            return evaluatePluginKit(operation: operation, item: item)
+        case .cron, .loginHook, .firewall:
+            return .denied(reason: "\(item.controlMechanism!.rawValue) control is not wired up yet")
+        case .launchd, nil:
+            break
+        }
+
         guard let label = item.label, !label.isEmpty else {
             return .denied(reason: "no launchd label — nothing reversible to act on")
         }
@@ -48,6 +59,31 @@ public enum RemediationGate {
             if PathUtils.canonicalize(probe).hasPrefix("/System") {
                 return .denied(reason: "backed by /System — refused even with --apply")
             }
+        }
+        return .allowed
+    }
+
+    /// App extensions (V0.7): the switch is the user's pluginkit election,
+    /// a per-user setting with nothing on disk to lose — `disable` elects
+    /// `ignore`, `enable` elects `use`. Nothing is ever deleted here.
+    static func evaluatePluginKit(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
+        guard operation != .remove else {
+            return .denied(reason: "app extension — launchkeeper never deletes extensions; `disable` sets "
+                + "the pluginkit election to ignore (reversible)")
+        }
+        guard let identifier = item.metadata["ext-identifier"], !identifier.isEmpty else {
+            return .denied(reason: "app extension without a pluginkit identifier — nothing to elect")
+        }
+        // The identifier travels into argv (never a shell). It came from the
+        // scan, but pluginkit reads a leading "-" as an option — refuse it.
+        guard !identifier.hasPrefix("-"), !identifier.contains(where: { $0.isWhitespace }) else {
+            return .denied(reason: "pluginkit identifier '\(identifier)' is not a plain bundle identifier")
+        }
+        if identifier.hasPrefix("com.apple.") {
+            return .denied(reason: "Apple extension (com.apple.*) — read-only by policy")
+        }
+        if let path = item.path, PathUtils.canonicalize(path).hasPrefix("/System") {
+            return .denied(reason: "extension inside /System — refused even with --apply")
         }
         return .allowed
     }
@@ -97,7 +133,9 @@ public enum TargetResolution {
 
 public enum TargetResolver {
     /// Same addressing rules as `inspect`: numeric = display id, otherwise a
-    /// case-insensitive fragment over displayName / label / key.
+    /// case-insensitive fragment over displayName / label / key — and, since
+    /// V0.7, an extension's pluginkit identifier (BTM-merged extensions carry
+    /// a BTM key, and the undo hints address them by identifier).
     public static func resolve(_ needle: String, in items: [BackgroundItem]) -> TargetResolution {
         let trimmed = needle.trimmingCharacters(in: .whitespaces)
         let lower = trimmed.lowercased()
@@ -110,6 +148,7 @@ public enum TargetResolver {
                 $0.displayName.lowercased().contains(lower)
                     || $0.label?.lowercased().contains(lower) == true
                     || $0.key.lowercased().contains(lower)
+                    || $0.metadata["ext-identifier"]?.lowercased().contains(lower) == true
             }
         }
         switch candidates.count {

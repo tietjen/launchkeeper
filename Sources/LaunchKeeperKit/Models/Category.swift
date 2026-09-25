@@ -51,17 +51,37 @@ public enum ControlLevel: String, Codable, Sendable {
     case displayOnly = "display-only"
 }
 
+/// WHICH subsystem owns an item's on/off switch (V0.7). One mechanism per
+/// item; gate, planner and executor dispatch on it, so a new switch is one
+/// new case in each — never a second code path around the gate.
+public enum ControlMechanism: String, Codable, CaseIterable, Sendable {
+    /// launchctl disable/enable override (V0.2).
+    case launchd
+    /// The user election of an app extension: `pluginkit -e use|ignore`.
+    case pluginkit
+    /// A line in the user's crontab, commented out / back in.
+    case cron
+    /// A loginwindow LoginHook / LogoutHook key.
+    case loginHook = "login-hook"
+    /// An Application Firewall rule: block / allow incoming connections.
+    case firewall
+}
+
 public struct Controllability: Codable, Equatable, Sendable {
     public var level: ControlLevel
     /// Commands that apply, in the tool's vocabulary ("disable", "enable", "remove").
     public var actions: [String]
     /// One sentence: why this level, or where the switch lives instead.
     public var reason: String
+    /// The switch the actions flip (V0.7); nil when there is none.
+    public var mechanism: ControlMechanism?
 
-    public init(level: ControlLevel, actions: [String], reason: String) {
+    public init(level: ControlLevel, actions: [String], reason: String,
+                mechanism: ControlMechanism? = nil) {
         self.level = level
         self.actions = actions
         self.reason = reason
+        self.mechanism = mechanism
     }
 }
 

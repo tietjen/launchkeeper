@@ -226,3 +226,21 @@ extension BackgroundItem {
         }
     }
 }
+
+extension BackgroundItem {
+    /// The subsystem that owns this item's switch (V0.7) — what the gate,
+    /// the planner and the executor dispatch on. Evidence decides, not the
+    /// category: an app extension that BTM also lists is still switched by
+    /// its pluginkit election. nil = nothing launchkeeper could flip.
+    public var controlMechanism: ControlMechanism? {
+        if sources.contains(where: { $0.kind == .pluginkit }) { return .pluginkit }
+        switch type {
+        case .cronJob: return .cron
+        case .loginHook: return .loginHook
+        case .firewallRule: return .firewall
+        default: break
+        }
+        if let label, !label.isEmpty { return .launchd }
+        return nil
+    }
+}

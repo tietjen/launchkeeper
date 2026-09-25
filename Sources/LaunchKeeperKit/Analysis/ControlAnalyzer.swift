@@ -79,13 +79,18 @@ public struct ControlAnalyzer {
         default:
             break
         }
-        // App extensions: the user election lives in pluginkit; launchkeeper
-        // shows it and (until V0.7) stops there.
-        if item.sources.contains(where: { $0.kind == .pluginkit }) {
-            let id = item.bundleIdentifier ?? item.displayName
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "app extension — the user election is `pluginkit -e use|ignore -i \(id)` "
-                    + "(launchkeeper control follows in V0.7)")
+        // App extensions (V0.7): the switch is the user's pluginkit
+        // election — flipped through the same gate as everything else.
+        if item.controlMechanism == .pluginkit {
+            switch RemediationGate.evaluate(operation: .disable, item: item) {
+            case .denied(let reason):
+                return Controllability(level: .displayOnly, actions: [], reason: reason, mechanism: .pluginkit)
+            case .allowed:
+                let id = item.metadata["ext-identifier"] ?? item.displayName
+                return Controllability(level: .reversible, actions: ["disable", "enable"],
+                    reason: "app extension — disable/enable set the pluginkit election (ignore/use) for \(id); "
+                        + "per user, nothing on disk changes", mechanism: .pluginkit)
+            }
         }
         // Records that only Background Task Management manages (extensions,
         // login items without a launch plist): the switch is in System
@@ -106,13 +111,16 @@ public struct ControlAnalyzer {
            case .allowed = RemediationGate.evaluateRemove(item: item, fileManager: fileManager,
                                                          launchDirs: launchDirs) {
             return Controllability(level: .removable, actions: ["disable", "enable", "remove"],
-                reason: "orphaned launch plist inside the launch directories — remove passes all four locks")
+                reason: "orphaned launch plist inside the launch directories — remove passes all four locks",
+                mechanism: .launchd)
         }
         if !item.plistPresent, item.launchdPresent {
             return Controllability(level: .reversible, actions: ["disable", "enable"],
-                reason: "launchd job without a plist on disk — disable unloads it; it vanishes at the next login")
+                reason: "launchd job without a plist on disk — disable unloads it; it vanishes at the next login",
+                mechanism: .launchd)
         }
         return Controllability(level: .reversible, actions: ["disable", "enable"],
-            reason: "launchd override — disable/enable, undo is one command; remove only once provably orphaned")
+            reason: "launchd override — disable/enable, undo is one command; remove only once provably orphaned",
+            mechanism: .launchd)
     }
 }

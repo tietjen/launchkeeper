@@ -116,15 +116,28 @@ public struct RemediationExecutor {
             messages.append("executed, but verification failed: \(failure)")
             return (.appliedFailed(failure), executed, messages)
         }
-        messages.append(operation == .remove
-                        ? "verified: file gone and launchd state consistent"
-                        : "verified: state change visible in launchd")
+        switch item.controlMechanism {
+        case .pluginkit:
+            messages.append("verified: election visible in pluginkit")
+        default:
+            messages.append(operation == .remove
+                            ? "verified: file gone and launchd state consistent"
+                            : "verified: state change visible in launchd")
+        }
         return (.appliedOk, executed, messages)
     }
 
     /// Verification reads only — never writes.
     private func verify(operation: RemediationOperation, item: BackgroundItem,
                         executed: [String]) -> String? {
+        switch item.controlMechanism {
+        case .pluginkit:
+            return verifyPluginKit(operation: operation, item: item)
+        case .cron, .loginHook, .firewall:
+            return "no verification for \(item.controlMechanism!.rawValue) yet"
+        case .launchd, nil:
+            break
+        }
         guard let label = item.label else { return "no label to verify" }
         let domainTarget = RemediationPlanner.domainTarget(for: item, uid: uid)
 
@@ -184,6 +197,27 @@ public struct RemediationExecutor {
         case .backup, .restore:
             return nil
         }
+    }
+}
+
+extension RemediationExecutor {
+    /// Re-reads the election of every registered version of the identifier —
+    /// `-e` applies to all of them, so all of them must show the new state.
+    func verifyPluginKit(operation: RemediationOperation, item: BackgroundItem) -> String? {
+        guard let identifier = item.metadata["ext-identifier"] else { return "no pluginkit identifier to verify" }
+        let result = runner.run(command: "/usr/bin/pluginkit", arguments: ["-mAvv", "-i", identifier],
+                                timeout: stepTimeout)
+        guard result.exitCode == 0 else { return "pluginkit -m failed (exit \(result.exitCode))" }
+        let records = PluginKitParser.parse(result.stdout).records.filter { $0.identifier == identifier }
+        guard !records.isEmpty else { return "pluginkit no longer lists '\(identifier)'" }
+        let expected: AppExtensionRecord.Election = operation == .disable ? .ignore : .use
+        let wrong = records.filter { $0.election != expected }
+        guard wrong.isEmpty else {
+            return "pluginkit still shows '\(identifier)' as "
+                + Set(wrong.map(\.election.rawValue)).sorted().joined(separator: "/")
+                + " (expected \(expected.rawValue))"
+        }
+        return nil
     }
 }
 
