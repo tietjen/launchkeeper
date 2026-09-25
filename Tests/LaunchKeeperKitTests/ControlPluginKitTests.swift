@@ -271,3 +271,59 @@ final class PluginKitControlEngineTests: XCTestCase {
         XCTAssertTrue(engine(pk, home: home).audit.readAll().contains("refused("))
     }
 }
+
+// MARK: - V0.7: the control matrix never promises what the gate would refuse
+
+final class ControlMatrixInvariantTests: XCTestCase {
+    private func samples() -> [BackgroundItem] {
+        var launchd = BackgroundItem(key: "com.vendor.agent", displayName: "agent", type: .launchAgentUser,
+                                     path: "/Users/alice/Library/LaunchAgents/com.vendor.agent.plist",
+                                     label: "com.vendor.agent", domain: .user, plistPresent: true)
+        launchd.launchdPresent = true
+        let appleJob = BackgroundItem(key: "com.apple.x", displayName: "x", type: .launchDaemon,
+                                      path: "/System/Library/LaunchDaemons/com.apple.x.plist", label: "com.apple.x",
+                                      domain: .system, plistPresent: true)
+        var cron = BackgroundItem(key: "cron:alice:crontab:/x", displayName: "/x", type: .cronJob,
+                                  owner: "alice", domain: .user, category: .scheduled)
+        cron.metadata = ["cron-source": "crontab -l (alice)", "cron-schedule": "0 3 * * *", "cron-command": "/x"]
+        var hook = BackgroundItem(key: "hook:LoginHook:system", displayName: "LoginHook", type: .loginHook,
+                                  path: "/Library/Preferences/com.apple.loginwindow.plist", executable: "/x",
+                                  domain: .system, category: .legacy)
+        hook.metadata["hook-kind"] = "LoginHook"
+        var rule = BackgroundItem(key: "fw:/opt/x", displayName: "x", type: .firewallRule, path: "/opt/x",
+                                  domain: .system, category: .network)
+        rule.metadata = ["firewall": "allow incoming connections", "firewall-path": "/opt/x"]
+        var ext = BackgroundItem(key: "ext:com.vendor.ext", displayName: "ext", type: .appExtension,
+                                 category: .appExtensions)
+        ext.sources = [SourceEvidence(kind: .pluginkit, detail: "x", confidence: .high)]
+        ext.metadata["ext-identifier"] = "com.vendor.ext"
+        let sysext = BackgroundItem(key: "sysext:x", displayName: "x", type: .systemExtension, domain: .system,
+                                    category: .systemExtensions)
+        let shell = BackgroundItem(key: "shell:~/.zshrc", displayName: ".zshrc", type: .shellProfile,
+                                   category: .shellStartup)
+        return [launchd, appleJob, cron, hook, rule, ext, sysext, shell]
+    }
+
+    func testEveryPromisedActionPassesTheGateAndDisplayOnlyPromisesNothing() {
+        let analyzer = ControlAnalyzer(launchDirs: [])
+        for item in samples() {
+            let control = analyzer.evaluate(item)
+            for action in control.actions {
+                guard let operation = RemediationOperation(rawValue: action) else {
+                    return XCTFail("\(item.key): unknown action \(action)")
+                }
+                XCTAssertEqual(RemediationGate.evaluate(operation: operation, item: item), .allowed,
+                               "\(item.key) promises \(action) but the gate refuses it")
+            }
+            if control.level == .displayOnly {
+                XCTAssertTrue(control.actions.isEmpty, "\(item.key): display-only must not list actions")
+            } else {
+                XCTAssertEqual(control.mechanism, item.controlMechanism, "\(item.key): matrix and dispatch disagree")
+            }
+            // Nothing outside launchd is ever removable here.
+            if item.controlMechanism != .launchd {
+                XCTAssertFalse(control.actions.contains("remove"), item.key)
+            }
+        }
+    }
+}

@@ -5,7 +5,44 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased] — 0.6.2
+## [0.7.0] — 2026-09-25
+
+### Added
+- `disable` / `enable` beyond launchd, through the same gate, dry-run by
+  default, verified after every change:
+  - **app extensions** — the pluginkit election (`-e ignore` / `-e use`),
+    verified on every registered version; undo returns to the exact previous
+    election (`-e default` when there was none). Apple and `/System`
+    extensions stay read-only.
+  - **user crontab lines** — commented out behind `#launchkeeper-disabled `
+    and back; the whole table is snapshotted first, the edited copy is
+    installed with `crontab <file>` and must read back byte for byte.
+    Disabled lines stay in the inventory. `/etc/crontab` stays read-only.
+  - **LoginHook / LogoutHook** — the script path is parked under
+    `LaunchKeeperDisabled<kind>` in the same loginwindow plist (park first,
+    delete second), and put back by `enable`; plist snapshot first, system
+    plist via sudo, `defaults import` as full rollback.
+  - **Application Firewall rules** — an existing rule flips to block
+    (`disable`) or allow (`enable`) via `socketfilterfw` and sudo, verified
+    through `--listapps`; rules are never added or removed, Apple binaries
+    stay read-only; a switched-off firewall is said out loud.
+- `Controllability.mechanism` (`launchd`, `pluginkit`, `cron`, `login-hook`,
+  `firewall`) in `inspect` and `--json`; config snapshots under
+  `~/Library/Application Support/launchkeeper/config-snapshots/` with a
+  sha256 manifest.
+
+### Changed
+- The control matrix: app extensions, user crontab lines, loginwindow hooks
+  and third-party firewall rules are `reversible` now (were display-only).
+  A `diff` against an older snapshot shows that as a control change.
+- Audit targets for the new mechanisms: `pluginkit/<id>`,
+  `crontab:<user>:line<N>` (never the command), `loginwindow:<domain>:<kind>`,
+  `firewall:<path>`.
+- Entries can be addressed by an extension's pluginkit identifier.
+
+35 new tests (292 total).
+
+## [0.6.2] — 2026-09-23
 
 ### Added
 - `inspect <entry> --verify`: the signature in depth for one entry —

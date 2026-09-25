@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.6.2)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.7.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -225,6 +225,12 @@ launchkeeper backup [--label <tag>]  # snapshot launch plists + disabled-overrid
                                # state (read-only, always safe)
 launchkeeper restore <snapshot> [--apply]  # copy files back from a snapshot
 
+# V0.7 — the same two verbs beyond launchd (dry-run unless --apply)
+launchkeeper disable <extension>     # pluginkit election → ignore   (enable → use)
+launchkeeper disable <cron entry>    # comment the crontab line out behind a marker
+launchkeeper disable hook:LoginHook:user  # park the hook in the loginwindow plist
+launchkeeper disable <firewall rule> # block incoming connections (enable → allow; sudo)
+
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
                                # orphaned launch plist (gated, dry-run)
@@ -327,7 +333,9 @@ Every item carries three more dimensions, visible in `inspect` and `--json`:
   `removable` (an orphaned launch plist that passes all four `remove`
   locks) or `display-only` with the reason and where the switch lives
   instead (Apple/System territory, Background Task Management leftovers,
-  extensions managed by System Settings).
+  system extensions). Since V0.7 it also names the **mechanism** — the
+  switch the actions flip (`launchd`, `pluginkit`, `cron`, `login-hook`,
+  `firewall`); see [Control beyond launchd](#control-beyond-launchd-v07).
 - **origin** — where it came from: Apple, Homebrew, Mac App Store receipt,
   an installer package receipt (`pkgutil`, with package id, version and
   install date), or `manual` for an app on disk that no receipt knows.
@@ -364,9 +372,9 @@ also lists (QuickLook, Spotlight, dock tiles) merge with their BTM record by
 bundle path, the rest become their own entries; `inspect` shows the
 extension point (`ext-sdk`), election and host app. Apple's own extensions
 are hidden from the default `list` like other Apple internals (`--all`).
-The election itself is read-only here (`pluginkit -e use|ignore -i <id>`);
-launchkeeper control follows in V0.7. A failed `pluginkit` call marks the
-inventory incomplete, like a failed BTM dump.
+Since V0.7 `disable`/`enable` set the election (`pluginkit -e ignore|use`)
+through the gate — Apple's extensions stay read-only. A failed `pluginkit`
+call marks the inventory incomplete, like a failed BTM dump.
 
 ## System extensions, kexts, privileged helpers (V0.5.5)
 
@@ -523,6 +531,44 @@ uploaded anywhere. The whole block is in `--json` too. This stays per
 entry on purpose: `spctl` costs a third of a second per path and its
 verdicts are worth reading, not summarizing.
 
+## Control beyond launchd (V0.7)
+
+`disable` and `enable` reach every switch macOS offers outside launchd —
+through the same gate, with the same guarantees: dry-run by default, the
+plan shown before anything runs, a snapshot of the whole source before the
+first write where there is a file to lose, verify-after-mutate, an audit
+line for every path. `remove` stays what it was: one orphaned launch plist.
+
+| mechanism | items | disable | enable | snapshot | verified by | never |
+|---|---|---|---|---|---|---|
+| `launchd` | launch agents/daemons | override + unload | drop override (`--now` reloads) | — (override is state) | `print` / `print-disabled` | `com.apple.*`, `/System` |
+| `pluginkit` | app extensions | `pluginkit -e ignore -i <id>` | `-e use` | — (previous election in plan + undo hint) | `pluginkit -mAvv -i <id>`, every version | Apple extensions, `/System` |
+| `cron` | lines in *your* crontab | comment out behind `#launchkeeper-disabled ` | take the marker off | whole table (`crontab -l`) | `crontab -l` reads back the edited table byte for byte | `/etc/crontab`, root tables, deleting lines |
+| `login-hook` | `LoginHook` / `LogoutHook` | park the path under `LaunchKeeperDisabled<kind>`, then delete the key | put it back, delete the parked key | the loginwindow plist | `defaults read` of both keys | overwriting a parked value |
+| `firewall` | existing Application Firewall rules | `socketfilterfw --blockapp` (sudo) | `--unblockapp` | — (previous action in plan + undo hint) | `socketfilterfw --listapps` | Apple binaries, adding or removing rules |
+
+- **Disabled stays visible.** A commented-out cron line and a parked hook
+  remain in the inventory as disabled entries — `enable` finds them again,
+  `diff` shows the change.
+- **Undo is exact.** Every plan prints the way back. An extension that had
+  no election at all returns with `pluginkit -e default -i <id>` (`enable`
+  would elect `use` — a different state); cron and hooks add a full rollback
+  from their snapshot (`crontab <file>`, `defaults import`).
+- **Tokens stay out of the log.** The audit target for cron is
+  `crontab:<user>:line<N>`, never the command line.
+- **The source is re-read at run time.** cron and hooks build the plan from
+  the table/plist as it reads *now*; if the entry moved or vanished since
+  the scan, the command refuses instead of guessing. The same schedule and
+  command twice, or a hook that is live *and* parked, are refused — resolve
+  by hand.
+- System plists and firewall rules go through the interactive sudo seam;
+  `crontab` and `pluginkit` run as you. Snapshots live under
+  `~/Library/Application Support/launchkeeper/config-snapshots/` with a
+  sha256 manifest.
+- The control matrix is data: `inspect` and `--json` show level, actions,
+  mechanism and reason, and a test holds the invariant that no item
+  promises an action the gate would refuse.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -627,6 +673,10 @@ orphans).
 
 ## Roadmap
 
+- **V0.7.0** ✅ — control beyond launchd: pluginkit elections, user-crontab
+  lines (marker, snapshot), loginwindow hooks (parked, snapshot), Application
+  Firewall rules (block/allow via sudo); the control matrix names its
+  mechanism, one gate for all of it
 - **V0.2** ✅ — disable/enable (launchctl-state only) + snapshot backup
   (`~/Library/Application Support/launchkeeper/backups`) + restore, dry-run by
   default, single gate, audit log

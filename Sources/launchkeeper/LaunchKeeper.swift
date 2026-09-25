@@ -472,7 +472,7 @@ private func performRemediation(operation: RemediationOperation, target: String,
 struct DisableCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "disable",
-        abstract: "Disable one item via a launchctl override (gated, reversible; dry-run by default).")
+        abstract: "Disable one item — launchd override, extension election, crontab line, login hook or firewall rule (gated, reversible; dry-run by default).")
 
     @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
     var id: String
@@ -489,7 +489,7 @@ struct DisableCommand: ParsableCommand {
 struct EnableCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "enable",
-        abstract: "Undo a disable override (dry-run by default). --now also reloads the job.")
+        abstract: "Undo a disable (dry-run by default). --now also reloads a launchd job.")
 
     @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
     var id: String
@@ -747,7 +747,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.6.2).
+        Background-service inventory + app correlation + gated remediation (V0.7.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -756,7 +756,7 @@ struct LaunchKeeper: ParsableCommand {
         com.apple.* labels and /System are refused by construction, no flag
         bypasses the gate.
         """,
-        version: "0.6.2",
+        version: "0.7.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
