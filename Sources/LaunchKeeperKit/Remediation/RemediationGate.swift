@@ -34,7 +34,7 @@ public enum RemediationGate {
         case .loginHook:
             return evaluateLoginHook(operation: operation, item: item)
         case .firewall:
-            return .denied(reason: "\(item.controlMechanism!.rawValue) control is not wired up yet")
+            return evaluateFirewall(operation: operation, item: item)
         case .launchd, nil:
             break
         }
@@ -130,6 +130,24 @@ public enum RemediationGate {
         }
         guard let script = item.executable, !script.isEmpty else {
             return .denied(reason: "hook without a script value — nothing to park")
+        }
+        return .allowed
+    }
+
+    /// Application Firewall (V0.7): an EXISTING rule flips between block and
+    /// allow — `disable` blocks incoming connections, `enable` allows them.
+    /// Apple's own binaries keep their rules; nothing is added or removed.
+    static func evaluateFirewall(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
+        guard operation != .remove else {
+            return .denied(reason: "firewall rule — launchkeeper flips block/allow; removing the rule is "
+                + "`sudo socketfilterfw --remove <path>` by hand")
+        }
+        guard let path = item.metadata["firewall-path"], path.hasPrefix("/"), !path.contains("/../") else {
+            return .denied(reason: "no firewall rule with an absolute path — nothing to flip")
+        }
+        let canonical = PathUtils.canonicalize(path)
+        if PathUtils.isApplePlatformPath(canonical) || canonical.hasPrefix("/System") {
+            return .denied(reason: "Apple platform binary — its firewall rule is read-only by policy")
         }
         return .allowed
     }

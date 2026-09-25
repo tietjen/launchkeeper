@@ -221,7 +221,9 @@ final class ShellNetworkCorrelationTests: XCTestCase {
         XCTAssertFalse(TableRenderer.flagsText(listener).contains("LISTEN"), "the network row itself is the listener")
         let standalone = try XCTUnwrap(items.first { $0.key == "fw:/Applications/Other.app" })
         XCTAssertEqual(standalone.type, .firewallRule)
-        XCTAssertEqual(standalone.control?.level, .displayOnly)
+        // V0.7.0: an existing third-party rule flips block/allow.
+        XCTAssertEqual(standalone.control?.level, .reversible)
+        XCTAssertEqual(listener.control?.mechanism, .firewall)
         // Apple's daemons hide by default, show with --all.
         let apple = try XCTUnwrap(items.first { $0.key == "net:/usr/libexec/rapportd" })
         var filter = ListFilter(); filter.category = .network

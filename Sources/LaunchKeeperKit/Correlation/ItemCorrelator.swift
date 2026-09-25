@@ -600,6 +600,8 @@ public struct ItemCorrelator {
         for rule in input.network.firewall {
             if let key = networkKeyByExecutable[rule.path] {
                 accum[key]?.metadata["firewall"] = rule.action + " incoming connections"
+                accum[key]?.metadata["firewall-path"] = rule.path
+                if let state = input.network.firewallState { accum[key]?.metadata["firewall-global"] = state }
                 accum[key]?.sources.append(SourceEvidence(kind: .firewall, detail: "socketfilterfw: \(rule.action) \(rule.path)",
                                                           confidence: .high))
                 continue
@@ -609,6 +611,8 @@ public struct ItemCorrelator {
                                       path: rule.path, executable: rule.path, owner: "root", uid: 0, domain: .system,
                                       enabled: true, category: .network)
             item.metadata["firewall"] = rule.action + " incoming connections"
+            item.metadata["firewall-path"] = rule.path
+            if let state = input.network.firewallState { item.metadata["firewall-global"] = state }
             if let owner = ownerKey(forExecutable: rule.path) { item.metadata["network-entry"] = owner }
             markDomain(&item, false)
             item.sources.append(SourceEvidence(kind: .firewall, detail: "socketfilterfw: \(rule.action) \(rule.path)",

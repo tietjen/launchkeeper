@@ -80,15 +80,24 @@ public struct ControlAnalyzer {
         case .shellProfile, .pathEntry:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "shell startup file — launchkeeper never edits shell files; review it in your editor")
-        case .listener:
+        case .listener where item.controlMechanism != .firewall:
             let entry = item.metadata["network-entry-label"] ?? item.metadata["network-entry"]
             return Controllability(level: .displayOnly, actions: [],
                 reason: "listening process — " + (entry.map { "control its entry `\($0)`" } ?? "no inventory entry starts it")
-                    + "; block it: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --blockapp <path>`")
-        case .firewallRule:
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "Application Firewall rule — `sudo /usr/libexec/ApplicationFirewall/socketfilterfw "
-                    + "--remove <path>` / System Settings › Network › Firewall")
+                    + "; no firewall rule yet — add one by hand: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw "
+                    + "--blockapp <path>`")
+        case .listener, .firewallRule:
+            switch RemediationGate.evaluate(operation: .disable, item: item) {
+            case .denied(let reason):
+                return Controllability(level: .displayOnly, actions: [], reason: reason, mechanism: .firewall)
+            case .allowed:
+                let entry = item.metadata["network-entry-label"] ?? item.metadata["network-entry"]
+                return Controllability(level: .reversible, actions: ["disable", "enable"],
+                    reason: "Application Firewall rule — disable blocks incoming connections, enable allows them "
+                        + "(socketfilterfw via sudo); the rule itself stays"
+                        + (entry.map { "; to stop the process, control its entry `\($0)`" } ?? ""),
+                    mechanism: .firewall)
+            }
         default:
             break
         }

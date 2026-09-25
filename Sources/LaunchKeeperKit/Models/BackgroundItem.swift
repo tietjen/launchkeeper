@@ -238,6 +238,9 @@ extension BackgroundItem {
         case .cronJob: return .cron
         case .loginHook: return .loginHook
         case .firewallRule: return .firewall
+        // A listening process that already has a firewall rule: its switch
+        // is that rule. Without one there is nothing to flip back exactly.
+        case .listener where metadata["firewall"] != nil: return .firewall
         default: break
         }
         if let label, !label.isEmpty { return .launchd }

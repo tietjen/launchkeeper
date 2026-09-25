@@ -43,7 +43,7 @@ public enum RemediationPlanner {
         case .loginHook:
             return "loginwindow:\(item.domain == .system ? "system" : "user"):\(item.metadata["hook-kind"] ?? "hook")"
         case .firewall:
-            return item.key
+            return "firewall:" + (item.metadata["firewall-path"] ?? item.key)
         case .launchd, nil:
             break
         }
@@ -87,8 +87,10 @@ public enum RemediationPlanner {
         switch item.controlMechanism {
         case .pluginkit:
             return planPluginKit(operation: operation, item: item)
-        case .cron, .loginHook, .firewall:
-            return []
+        case .firewall:
+            return planFirewall(operation: operation, item: item)
+        case .cron, .loginHook:
+            return []   // built by the engine from the source as it reads now
         case .launchd, nil:
             break
         }
@@ -165,6 +167,34 @@ public enum RemediationPlanner {
         }
     }
 
+    /// V0.7 Application Firewall: socketfilterfw needs root — the sudo seam.
+    static let socketfilterfw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+    static func planFirewall(operation: RemediationOperation, item: BackgroundItem) -> [PlannedCommand] {
+        guard let path = item.metadata["firewall-path"] else { return [] }
+        let previous = item.metadata["firewall"] ?? "unknown"
+        switch operation {
+        case .disable:
+            return [PlannedCommand(command: "/usr/bin/sudo", arguments: [socketfilterfw, "--blockapp", path],
+                                   description: "block incoming connections (was: \(previous)) — via sudo (interactive password)")]
+        case .enable:
+            return [PlannedCommand(command: "/usr/bin/sudo", arguments: [socketfilterfw, "--unblockapp", path],
+                                   description: "allow incoming connections (was: \(previous)) — via sudo (interactive password)")]
+        case .remove, .backup, .restore:
+            return []
+        }
+    }
+
+    /// Facts the user should read next to a plan (V0.7) — not refusals.
+    public static func notes(for operation: RemediationOperation, item: BackgroundItem) -> [String] {
+        var notes: [String] = []
+        if item.controlMechanism == .firewall, item.metadata["firewall-global"] == "disabled" {
+            notes.append("note: the Application Firewall is OFF — the rule is stored, but it only takes "
+                + "effect once the firewall is on (System Settings › Network › Firewall)")
+        }
+        return notes
+    }
+
     /// Undo hint shown next to every plan (reversibility over minimalism).
     /// Addressed by LABEL, never by display id: the id is positional and stable
     /// only within one scan run — a hint the user executes later would resolve
@@ -185,6 +215,12 @@ public enum RemediationPlanner {
         // Undo = back to the PREVIOUS election, exactly. An extension without
         // one ("none") returns with `-e default` — `enable` would elect
         // `use`, a different state (a Finder Sync extension would start).
+        if item.controlMechanism == .firewall {
+            guard operation == .disable || operation == .enable else { return nil }
+            let address = shellQuoted(item.metadata["firewall-path"] ?? target)
+            return (item.metadata["firewall"] ?? "").hasPrefix("block")
+                ? "launchkeeper disable \(address)" : "launchkeeper enable \(address)"
+        }
         if item.controlMechanism == .loginHook {
             switch operation {
             case .disable: return "launchkeeper enable \(shellQuoted(target))"

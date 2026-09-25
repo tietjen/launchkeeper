@@ -132,6 +132,8 @@ public struct RemediationExecutor {
             messages.append("verified: election visible in pluginkit")
         case .cron:
             messages.append("verified: crontab -l reads back exactly the edited table")
+        case .firewall:
+            messages.append("verified: socketfilterfw --listapps shows the rule as \(operation == .disable ? "block" : "allow")")
         case .loginHook:
             messages.append(operation == .disable ? "verified: defaults shows the hook parked, the live key gone"
                                                   : "verified: defaults shows the hook live again")
@@ -158,7 +160,7 @@ public struct RemediationExecutor {
         case .loginHook:
             return verifyLoginHook(operation: operation, item: item, script: expectation)
         case .firewall:
-            return "no verification for \(item.controlMechanism!.rawValue) yet"
+            return verifyFirewall(operation: operation, item: item)
         case .launchd, nil:
             break
         }
@@ -225,6 +227,18 @@ public struct RemediationExecutor {
 }
 
 extension RemediationExecutor {
+    /// The rule list is readable without root — the same read the scan does.
+    func verifyFirewall(operation: RemediationOperation, item: BackgroundItem) -> String? {
+        guard let path = item.metadata["firewall-path"] else { return "no firewall rule to verify" }
+        let list = runner.run(command: RemediationPlanner.socketfilterfw, arguments: ["--listapps"], timeout: stepTimeout)
+        guard list.exitCode == 0 else { return "socketfilterfw --listapps failed (exit \(list.exitCode))" }
+        guard let rule = FirewallListParser.parse(list.stdout).first(where: { $0.path == path }) else {
+            return "no firewall rule for \(path) anymore"
+        }
+        let expected = operation == .disable ? "block" : "allow"
+        return rule.action == expected ? nil : "the rule still says \(rule.action) (expected \(expected))"
+    }
+
     /// Reads both keys back through `defaults` (cfprefsd's view, which is
     /// what loginwindow sees): the live key must be gone and the parked one
     /// hold the script after disable — and the other way round after enable.
@@ -390,6 +404,7 @@ public struct RemediationEngine {
                 let plan = RemediationPlanner.plan(operation: operation, item: item,
                                                    uid: environment.uid, now: now,
                                                    systemDirPrefixes: environment.systemDirPrefixes)
+                messages.append(contentsOf: RemediationPlanner.notes(for: operation, item: item))
                 guard apply else {
                     if operation == .remove {
                         messages.append("dry-run: a full launch-dir backup would be created first, "
@@ -428,7 +443,7 @@ public struct RemediationEngine {
                 let executor = RemediationExecutor(runner: environment.runner, uid: environment.uid,
                                                    fileManager: environment.fileManager)
                 let outcome = executor.execute(plan, operation: operation, item: item)
-                return finish(outcome.status, target: target, messages: outcome.messages,
+                return finish(outcome.status, target: target, messages: messages + outcome.messages,
                               plan: plan, executed: outcome.executed, undo: undoText)
             }
         }
