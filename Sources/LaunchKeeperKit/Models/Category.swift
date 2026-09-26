@@ -72,7 +72,11 @@ public enum ControlMechanism: String, Codable, CaseIterable, Sendable {
 
 public struct Controllability: Codable, Equatable, Sendable {
     public var level: ControlLevel
-    /// Commands that apply, in the tool's vocabulary ("disable", "enable", "remove").
+    /// Action name of the working removal (V0.10): `remove --working` —
+    /// disable, then move the plist into the quarantine.
+    public static let removeWorking = "remove-working"
+
+    /// Commands that apply, in the tool's vocabulary ("disable", "enable", "remove", "remove-working").
     public var actions: [String]
     /// One sentence: why this level, or where the switch lives instead.
     public var reason: String

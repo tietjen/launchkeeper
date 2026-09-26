@@ -84,7 +84,8 @@ final class ControlAnalyzerTests: XCTestCase {
         item.plistPresent = true
         let c = analyzer.evaluate(item)
         XCTAssertEqual(c.level, .reversible)
-        XCTAssertEqual(c.actions, ["disable", "enable"])
+        // V0.10: a working plist inside the launch dirs can also be quarantined (`remove --working`).
+        XCTAssertEqual(c.actions, ["disable", "enable", Controllability.removeWorking])
     }
 
     func testOrphanedLaunchPlistIsRemovable() {

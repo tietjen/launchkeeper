@@ -150,8 +150,16 @@ public struct ControlAnalyzer {
                 reason: "launchd job without a plist on disk — disable unloads it; it vanishes at the next login",
                 mechanism: .launchd)
         }
-        return Controllability(level: .reversible, actions: ["disable", "enable"],
-            reason: "launchd override — disable/enable, undo is one command; remove only once provably orphaned",
+        // V0.10: a working plist inside the launch directories can also be
+        // taken away — disabled, then moved into the quarantine (`remove --working`).
+        var actions = ["disable", "enable"]
+        if case .allowed = RemediationGate.evaluateRemove(item: item, fileManager: fileManager,
+                                                         launchDirs: launchDirs, allowWorking: true) {
+            actions.append(Controllability.removeWorking)
+        }
+        return Controllability(level: .reversible, actions: actions,
+            reason: "launchd override — disable/enable, undo is one command; remove deletes only once provably "
+                + "orphaned, `remove --working` quarantines a working plist",
             mechanism: .launchd)
     }
 

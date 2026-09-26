@@ -44,9 +44,26 @@ final class RemovalRunner: CommandRunner {
         return (try? fm.removeItem(atPath: path)) != nil
     }
 
+    /// V0.10 working removal: `mkdir -p -- dir` and `mv -- src dir/` run for
+    /// real inside the temp tree, so the quarantine can be verified on disk.
+    private func fileOperation(_ command: String, _ arguments: [String]) -> Int32? {
+        if command == "/bin/mkdir", arguments.count == 3, arguments[0] == "-p", arguments[1] == "--" {
+            return (try? fm.createDirectory(atPath: arguments[2], withIntermediateDirectories: true)) != nil ? 0 : 1
+        }
+        if command == "/bin/mv", arguments.count == 3, arguments[0] == "--" {
+            let source = arguments[1]
+            let target = arguments[2] + (source as NSString).lastPathComponent
+            return (try? fm.moveItem(atPath: source, toPath: target)) != nil ? 0 : 1
+        }
+        return nil
+    }
+
     func run(command: String, arguments: [String], timeout: TimeInterval) -> CommandResult {
         let key = ([command] + arguments).joined(separator: " ")
         log.append(key)
+        if let exit = fileOperation(command, arguments) {
+            return CommandResult(exitCode: exit, stdout: "", stderr: "")
+        }
         if let path = rmTarget(command, arguments) {
             return delete(path)
                 ? CommandResult(exitCode: 0, stdout: "", stderr: "")
@@ -163,6 +180,26 @@ final class RemovalGateTests: XCTestCase {
             return XCTFail("non-orphaned must be refused")
         }
         XCTAssertTrue(reason.contains("not orphaned"), "actual: \(reason)")
+    }
+
+    func testNonOrphanAllowedOnlyForTheWorkingRemoval() {
+        // V0.10: `remove --working` lifts lock 4 — but not the others.
+        let inside = item(path: "/Users/test/Library/LaunchAgents/de.test.thing.plist", orphaned: false)
+        XCTAssertEqual(RemediationGate.evaluateRemove(item: inside, launchDirs: dirs, allowWorking: true), .allowed)
+        let outside = item(path: "/private/tmp/de.test.thing.plist", orphaned: false)
+        guard case .denied = RemediationGate.evaluateRemove(item: outside, launchDirs: dirs, allowWorking: true) else {
+            return XCTFail("the allowlist still applies to the working removal")
+        }
+    }
+
+    func testProfileManagedEntryIsNeverRemovedWhileWorking() {
+        var managed = item(path: "/Users/test/Library/LaunchAgents/de.test.thing.plist", orphaned: false)
+        managed.metadata["btm-disposition"] = "[enabled, allowed, visible, managed]"
+        guard case .denied(let reason) = RemediationGate.evaluateRemove(item: managed, launchDirs: dirs,
+                                                                        allowWorking: true) else {
+            return XCTFail("an MDM-managed entry must be refused")
+        }
+        XCTAssertTrue(reason.contains("configuration profile"), "actual: \(reason)")
     }
 
     func testSymlinkEscapingAllowlistRefused() throws {
@@ -510,6 +547,49 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: plist))
         XCTAssertFalse(setup.runner.log.contains { $0.contains("rm") })
         XCTAssertTrue(setup.engine.audit.readAll().contains("refused(not orphaned"))
+    }
+
+    func testWorkingRemovalPlansDisableThenQuarantineWithoutSudo() throws {
+        let setup = try makeSetup(entries: [("com.example.calm", calmArgs)],
+                                  services: ["com.example.calm": 555])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        let plist = setup.agents + "/com.example.calm.plist"
+
+        let result = setup.engine.run(operation: .remove, target: "com.example.calm", apply: false,
+                                      allowWorking: true, scanOptions: userOnly)
+        XCTAssertEqual(result.status, .planned, "actual: \(result.messages)")
+        let steps = result.plan.map(\.display)
+        XCTAssertEqual(steps.prefix(2), ["/bin/launchctl disable gui/501/com.example.calm",
+                                         "/bin/launchctl bootout gui/501/com.example.calm"],
+                       "override first, then unload — the file is never pulled from a running job")
+        XCTAssertTrue(steps[2].hasPrefix("/bin/mkdir -p -- \(setup.home)/Library/Application Support/launchkeeper/quarantine/"))
+        XCTAssertTrue(steps[3].hasPrefix("/bin/mv -- \(plist) "), "moved, never rm: \(steps)")
+        XCTAssertFalse(steps.contains { $0.contains("sudo") || $0.contains("/bin/rm") }, "\(steps)")
+        XCTAssertTrue(result.messages.contains { $0.contains("working entry") })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: plist), "dry-run touches nothing")
+    }
+
+    func testWorkingRemovalDisablesAndMovesIntoTheQuarantine() throws {
+        let setup = try makeSetup(entries: [("com.example.calm", calmArgs)],
+                                  services: ["com.example.calm": 555])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        let plist = setup.agents + "/com.example.calm.plist"
+
+        let result = setup.engine.run(operation: .remove, target: "com.example.calm", apply: true,
+                                      allowWorking: true, scanOptions: userOnly)
+        XCTAssertEqual(result.status, .appliedOk, "actual: \(result.status) \(result.messages)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plist))
+        XCTAssertTrue(setup.runner.launchd.disabled.contains("com.example.calm"),
+                      "the override stays: a re-written plist cannot start")
+        XCTAssertFalse(setup.runner.launchd.services.keys.contains("com.example.calm"))
+        let quarantine = setup.home + "/Library/Application Support/launchkeeper/quarantine"
+        let entries = try FileManager.default.contentsOfDirectory(atPath: quarantine)
+        XCTAssertEqual(entries.count, 1)
+        let moved = quarantine + "/\(entries[0])/files" + plist
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moved), "restorable copy at \(moved)")
+        XCTAssertTrue(result.undoHint?.contains("quarantine restore \(entries[0])") == true, "\(result.undoHint ?? "")")
+        XCTAssertTrue(result.undoHint?.contains("enable com.example.calm") == true)
+        XCTAssertTrue(snapshotNames(setup).isEmpty, "the quarantine is the undo — no launch-dir backup")
     }
 
     func testAppleLabelRefusedEndToEndForRemove() throws {

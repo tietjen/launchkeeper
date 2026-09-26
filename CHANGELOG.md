@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.10.0] — 2026-09-26
+
+### Added
+- `remove --working`: take away a working launch plist — the way to get rid
+  of an unwanted or malicious agent, which is never orphaned (its program is
+  there). It never deletes: `disable` first (override, then unload), then the
+  plist is moved into the quarantine, restorable with
+  `launchkeeper quarantine restore`. The disable override stays, so an app or
+  updater that writes the plist again cannot start it. Locks 1–3 of `remove`
+  still apply, plus lock 5: entries Background Task Management marks as
+  managed (configuration profile / MDM) are refused. Plain `remove` stays
+  orphans-only.
+- `Controllability.removeWorking` (`remove-working`) in the actions of
+  working launch plists that would pass those locks.
+
+### Changed
+- Quarantine moves of files in the user's own home run without sudo.
+
+4 new tests (343 total).
+
 ## [0.9.5] — 2026-09-26
 
 ### Changed

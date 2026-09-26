@@ -850,9 +850,9 @@ private func printCleanup(_ result: CleanupResult, engine: CleanupEngine, list: 
 /// Engine-backed display + JSON for disable/enable. All decisions already
 /// happened in LaunchKeeperKit (gate/plan/executor); this only renders and audits.
 private func performRemediation(operation: RemediationOperation, target: String,
-                                apply: Bool, now: Bool, json: Bool) throws {
+                                apply: Bool, now: Bool, json: Bool, allowWorking: Bool = false) throws {
     let engine = RemediationEngine()
-    let result = engine.run(operation: operation, target: target, apply: apply, now: now)
+    let result = engine.run(operation: operation, target: target, apply: apply, now: now, allowWorking: allowWorking)
 
     if json {
         struct RemediationJSON: Codable {
@@ -1071,7 +1071,10 @@ struct RemoveCommand: ParsableCommand {
         Since V0.8.1 provable leftovers — a privileged helper no job starts,
         a StartupItem, a paths.d file whose every entry is gone — are MOVED
         into the quarantine instead (`launchkeeper quarantine restore`).
-        A working component must be disabled instead (reversible).
+        A working component is disabled (reversible) — or, with --working
+        (V0.10), disabled AND its plist moved into the quarantine: the way
+        to take away an unwanted agent whose program is still there. The
+        disable override stays, so a re-written plist cannot start.
         """)
 
     @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
@@ -1080,9 +1083,13 @@ struct RemoveCommand: ParsableCommand {
     var apply = false
     @Flag(name: .customLong("json"), help: "machine-readable output")
     var json = false
+    @Flag(name: .customLong("working"),
+          help: "also a working launch plist: disable it, then move the plist into the quarantine (never deleted)")
+    var working = false
 
     mutating func run() throws {
-        try performRemediation(operation: .remove, target: id, apply: apply, now: false, json: json)
+        try performRemediation(operation: .remove, target: id, apply: apply, now: false, json: json,
+                               allowWorking: working)
     }
 }
 
@@ -1192,7 +1199,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.9.5).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.10.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1203,7 +1210,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.9.5",
+        version: "0.10.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

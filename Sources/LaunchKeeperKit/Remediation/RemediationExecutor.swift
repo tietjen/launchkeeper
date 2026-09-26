@@ -315,8 +315,12 @@ public struct RemediationEngine {
 
     /// `scanOptions` is injectable so tests can keep the scan hermetic
     /// (user-domain only, no real system reads).
+    ///
+    /// `allowWorking` (V0.10, `remove --working`): `remove` may take away a
+    /// working launch plist too — disabled first, then moved into the
+    /// quarantine, never deleted. Without it, `remove` stays orphans-only.
     public func run(operation: RemediationOperation, target needle: String,
-                    apply: Bool, now: Bool = false,
+                    apply: Bool, now: Bool = false, allowWorking: Bool = false,
                     scanOptions: ScanOptions = RemediationEngine.defaultScanOptions) -> RemediationResult {
         // Remediation READS the scan (target resolution needs live loaded/enabled
         // state and the full id space) but never extends it.
@@ -415,7 +419,7 @@ public struct RemediationEngine {
                 // directories, symlink escape, not orphaned, or file already
                 // gone. No flag on any command reaches past this point.
                 if operation == .remove {
-                    switch removePreflight(item) {
+                    switch removePreflight(item, allowWorking: allowWorking) {
                     case .denied(let reason):
                         return finish(.refused(reason), target: target,
                                       messages: ["refused: \(reason)",
@@ -423,6 +427,12 @@ public struct RemediationEngine {
                                       undo: undo)
                     case .allowed:
                         break
+                    }
+                    // V0.10: a working entry is never deleted — disabled, then quarantined.
+                    if !item.orphaned {
+                        let working = removeWorking(item, apply: apply, audit: audit)
+                        return finish(working.status, target: target, messages: working.messages,
+                                      plan: working.plan, executed: working.executed, undo: working.undo)
                     }
                 }
 
@@ -624,7 +634,7 @@ public struct RemediationEngine {
     /// A refusal names the step that DOES help (V0.4.2): a job launchd still
     /// holds from a plist that is already gone is unloaded by `disable`, and
     /// a lone BTM record is nothing this tool can or should touch.
-    private func removePreflight(_ item: BackgroundItem) -> GateDecision {
+    private func removePreflight(_ item: BackgroundItem, allowWorking: Bool) -> GateDecision {
         let hint: String
         if item.loaded, let label = item.label {
             let target = RemediationPlanner.displayTarget(for: item, uid: environment.uid)
@@ -645,6 +655,53 @@ public struct RemediationEngine {
         }
         return RemediationGate.evaluateRemove(item: item,
                                               fileManager: environment.fileManager,
-                                              launchDirs: environment.launchDirs)
+                                              launchDirs: environment.launchDirs,
+                                              allowWorking: allowWorking)
+    }
+
+    /// `remove --working` (V0.10): take away a launch plist whose program is
+    /// still there.
+    ///
+    /// 1. `disable` — the persistent override first, then unload. The
+    ///    override stays afterwards: an installer or app that writes the
+    ///    plist again cannot start it without the user's `enable`.
+    /// 2. Move the plist into the quarantine (the cleanup engine's move,
+    ///    with its checks: still on disk, regular file, not claimed by an
+    ///    Apple receipt) — restorable, never deleted.
+    ///
+    /// Both halves verify; the move only runs when the disable verified.
+    private func removeWorking(_ item: BackgroundItem, apply: Bool, audit: AuditLog)
+        -> (status: RemediationStatus, messages: [String], plan: [PlannedCommand], executed: [String], undo: String?) {
+        let label = item.label ?? item.key
+        let disablePlan = RemediationPlanner.plan(operation: .disable, item: item, uid: environment.uid, now: false,
+                                                  systemDirPrefixes: environment.systemDirPrefixes)
+        let cleanup = CleanupEngine(environment: CleanupEnvironment(
+            runner: environment.runner, disk: environment.disk, home: environment.home,
+            quarantineRoot: environment.quarantineRoot), audit: audit)
+        let preview = cleanup.quarantineItem(item, apply: false)
+        guard case .planned = preview.status else {
+            return (preview.status, preview.messages, [], [], nil)
+        }
+        let program = item.executable.map { " (\($0))" } ?? ""
+        var messages = [
+            "working entry: its program is still there\(program) — an installed app or updater may write the "
+                + "plist again; the disable override stays, so it cannot start without `launchkeeper enable \(label)`",
+        ] + preview.messages.filter { !$0.hasPrefix("dry-run:") }
+        let undoText = "launchkeeper quarantine restore <the new quarantine entry> && launchkeeper enable \(label)"
+        guard apply else {
+            messages.append("dry-run: nothing executed (add --apply to execute)")
+            return (.planned, messages, disablePlan + preview.plan, [], undoText)
+        }
+        let executor = RemediationExecutor(runner: environment.runner, uid: environment.uid,
+                                           fileManager: environment.fileManager)
+        let disabled = executor.execute(disablePlan, operation: .disable, item: item)
+        guard case .appliedOk = disabled.status else {
+            return (disabled.status, messages + disabled.messages + ["nothing moved — the entry was not disabled"],
+                    disablePlan + preview.plan, disabled.executed, "launchkeeper enable \(label)")
+        }
+        let moved = cleanup.quarantineItem(item, apply: true)
+        let undo = moved.undoHint.map { $0 + " && launchkeeper enable \(label)" } ?? "launchkeeper enable \(label)"
+        return (moved.status, messages + disabled.messages + moved.messages, disablePlan + moved.plan,
+                disabled.executed + moved.executed, undo)
     }
 }

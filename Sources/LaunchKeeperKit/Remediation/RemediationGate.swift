@@ -193,9 +193,16 @@ public enum RemediationGate {
     /// fail-closed. The last one is what keeps launchkeeper from becoming an
     /// `rm`-wrapper: a working component gets DISABLED (reversible), never
     /// deleted — anything that is not provably broken is not touched.
+    ///
+    /// V0.10: `allowWorking` lifts lock 4 for an entry whose program is still
+    /// there — the only way to take away a working (e.g. unwanted or
+    /// malicious) agent, which is never orphaned. Such a removal never
+    /// deletes: the engine disables it first and moves the plist into the
+    /// quarantine. Locks 1–3 and lock 5 (not managed by a profile) stay.
     public static func evaluateRemove(item: BackgroundItem,
                                       fileManager: FileManager = .default,
-                                      launchDirs: [String]) -> GateDecision {
+                                      launchDirs: [String],
+                                      allowWorking: Bool = false) -> GateDecision {
         // Lock 1: only a launch-dir .plist may ever be the target of a delete.
         guard let path = item.path, path.hasPrefix("/"), path.hasSuffix(".plist") else {
             return .denied(reason: "no backing launch .plist — remove deletes plists inside launch directories, nothing else")
@@ -213,11 +220,28 @@ public enum RemediationGate {
         if canonical != path, !launchDirs.contains(canonicalParent) {
             return .denied(reason: "backing file is a symlink resolving outside the launch directories")
         }
-        // Lock 4: orphaned only.
-        guard item.orphaned else {
-            return .denied(reason: "not orphaned — a working component must be disabled (reversible), not deleted")
+        // Lock 4: orphaned only — unless the caller asked for the working
+        // removal explicitly (`remove --working`), which quarantines instead.
+        guard item.orphaned || allowWorking else {
+            return .denied(reason: "not orphaned — a working component must be disabled (reversible), not deleted; "
+                + "`remove --working` disables it and moves the plist into the quarantine instead")
+        }
+        // Lock 5: a profile (MDM) decides about its own services — best
+        // effort from the Background Task Management record.
+        if !item.orphaned, isManagedByProfile(item) {
+            return .denied(reason: "managed by a configuration profile (MDM) — the profile decides, not launchkeeper")
         }
         return .allowed
+    }
+
+    /// Whether Background Task Management marks the entry as managed
+    /// (installed or enforced by a configuration profile).
+    /// - Parameter item: The entry.
+    /// - Returns: `true` when the BTM disposition or type says "managed".
+    static func isManagedByProfile(_ item: BackgroundItem) -> Bool {
+        let disposition = (item.metadata["btm-disposition"] ?? "").lowercased()
+        let type = (item.metadata["btm-type"] ?? "").lowercased()
+        return disposition.contains("managed") || type.contains("managed")
     }
 }
 

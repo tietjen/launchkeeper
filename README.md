@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.9.5)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.10.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -269,6 +269,9 @@ launchkeeper remove <id|name> --apply  # execute — but only after the pre-dele
                                # a job launchd still holds from a plist that is
                                # already gone is REFUSED here — the refusal names
                                # the working command (launchkeeper disable … --apply)
+launchkeeper remove <id|name> --working [--apply]  # V0.10: a WORKING plist — disable
+                               # (override + unload), then move the plist into
+                               # the quarantine; never deleted, the override stays
 
 # V0.4 — the BTM database reset (the one non-restorable command)
 launchkeeper resetbtm                # dry-run: shows the record count, names the
@@ -283,7 +286,9 @@ launchkeeper resetbtm --apply        # audit snapshot (full dumpbtm + sfltool
 ```
 
 Note: `remove` refuses working components — they leave via `disable`
-(reversible), never via deletion. Undo for a deletion is two steps:
+(reversible), never via deletion. Since V0.10 `remove --working` takes one
+away without deleting it: disabled, then its plist moved into the quarantine
+(profile-managed entries refused). Undo for a deletion is two steps:
 `launchkeeper restore <snapshot> && launchkeeper enable <label> --now`. `resetbtm` has
 no undo at all; its snapshot exists so the destruction is on record, and
 registrations come back only as the owning apps run again.

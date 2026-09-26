@@ -331,11 +331,18 @@ public struct CleanupEngine {
         let name = store.makeName(kind: "remove", subject: (path as NSString).lastPathComponent)
         let parent = (path as NSString).deletingLastPathComponent
         let destination = store.quarantinedPath(name, original: parent)
+        // V0.10: a file in the user's own home moves without sudo (the working
+        // removal of a ~/Library/LaunchAgents plist); everything else needs root.
+        let inHome = path.hasPrefix(environment.home + "/")
+        func step(_ tool: String, _ arguments: [String], _ description: String) -> PlannedCommand {
+            inHome ? PlannedCommand(command: tool, arguments: arguments, description: description)
+                   : PlannedCommand(command: "/usr/bin/sudo", arguments: [tool] + arguments, description: description)
+        }
         let plan = [
-            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mkdir", "-p", "--", destination],
-                           description: "quarantine directory for \(parent)"),
-            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mv", "--", disk.disk(path), destination + "/"],
-                           description: "move the leftover into the quarantine (restorable)"),
+            step("/bin/mkdir", ["-p", "--", destination], "quarantine directory for \(parent)"),
+            step("/bin/mv", ["--", disk.disk(path), destination + "/"],
+                 item.orphaned ? "move the leftover into the quarantine (restorable)"
+                               : "move the plist into the quarantine (restorable)"),
         ]
         guard apply else {
             return result(.planned, messages + ["dry-run: nothing moved (add --apply)"], plan: plan,
