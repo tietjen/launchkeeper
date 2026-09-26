@@ -27,6 +27,10 @@ public enum LaunchKeeperPaths {
     public static func configSnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/config-snapshots"
     }
+    /// V0.8: what cleanup took away, moved (not deleted), with manifests.
+    public static func quarantine(home: String) -> String {
+        home + "/Library/Application Support/\(productName)/quarantine"
+    }
     /// V0.6.1: whole-inventory snapshots for `diff`.
     public static func inventorySnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/inventory"

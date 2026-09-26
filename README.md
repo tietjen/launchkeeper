@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.7.0)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -15,8 +15,12 @@ V0.4 adds **app correlation** to the read-only half: every item learns
 its parent application, and orphan detection gains an independent
 Spotlight second source.
 
+Since V0.8 it can also take away what an installer package put on disk —
+**only files that provably still are what the package installed, moved
+into a quarantine, never deleted** — see [Cleanup](#cleanup-uninstall-by-receipt-v08).
+
 Think "Sysinternals Autoruns for macOS, as a CLI". **It is not** a malware
-scanner, antivirus, uninstaller or system cleaner.
+scanner, antivirus or one-click system cleaner.
 
 ## Design guarantee: inventory ↔ destructive ops stay separate
 
@@ -30,6 +34,12 @@ plist, not a symlink escape, and the entry is *provably orphaned*.
 Nothing that still works is ever deleted — a working component leaves
 via `disable` (reversible). This is the rule that keeps launchkeeper out of
 `rm`-wrapper territory.
+
+V0.8 cleanup keeps the same line with a stronger tool: `uninstall` takes
+away only files that still match the package's bill of materials (size +
+checksum), and it **moves** them into a quarantine instead of deleting
+them — `quarantine restore` puts everything back. The one real deletion in
+launchkeeper is `quarantine purge`, explicitly, one entry at a time.
 
 Remediation rules, enforced in code (not docs):
 
@@ -230,6 +240,15 @@ launchkeeper disable <extension>     # pluginkit election → ignore   (enable �
 launchkeeper disable <cron entry>    # comment the crontab line out behind a marker
 launchkeeper disable hook:LoginHook:user  # park the hook in the loginwindow plist
 launchkeeper disable <firewall rule> # block incoming connections (enable → allow; sudo)
+
+# V0.8 — cleanup by package receipt (dry-run unless --apply; moves, never deletes)
+launchkeeper uninstall <package-id>                  # what would move, what stays and why
+launchkeeper uninstall <package-id> --verify-as-root # also prove root-only files now (sudo)
+launchkeeper uninstall <package-id> --list           # every file, not only the move roots
+launchkeeper uninstall <package-id> --apply          # move into the quarantine (sudo), forget the receipt if nothing stays
+launchkeeper quarantine [list]                       # what cleanup took away
+launchkeeper quarantine restore <name> [--apply]     # move it all back (never overwrites)
+launchkeeper quarantine purge <name> [--apply]       # delete one entry for good — the only real deletion
 
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
@@ -569,6 +588,56 @@ line for every path. `remove` stays what it was: one orphaned launch plist.
   mechanism and reason, and a test holds the invariant that no item
   promises an action the gate would refuse.
 
+## Cleanup: uninstall by receipt (V0.8)
+
+`launchkeeper uninstall <package-id>` takes away what an installer package
+put on disk — addressed by the exact id `pkgutil` knows (`launchkeeper
+receipts`), never by a fragment. Expert tool; you have been warned. The
+rules, enforced in code:
+
+- **Proof, not trust.** Every path in the package's bill of materials
+  (`/var/db/receipts/<id>.bom`) is checked against the disk: a file must
+  still have its size and 32-bit checksum (the POSIX `cksum` CRC the BOM
+  records), a symlink its target. Only that is *intact*. An edited file is
+  *modified* and stays; a root-only file is *unreadable* and stays unless
+  `--verify-as-root` (or `--apply`, which always does it) proves it with
+  `sudo -n cksum` after one `sudo -v`.
+- **Nobody else's.** A path another receipt lists — Apple's included, asked
+  per directory with `pkgutil --file-info` — is *shared* and stays. Live
+  lesson: Apple's data template lists `/Library/Printers/PPDs`, which a
+  printer driver's receipt lists too. Top-level locations two levels deep
+  (`/Library/<Vendor>`, `/opt/<tool>`) never move; if one would be left
+  empty, the plan says so. `/System`, `/usr` (except `/usr/local`),
+  `/bin`, `/sbin` and the receipts database are protected whatever a BOM
+  claims, and a path behind a symlinked parent is never followed.
+- **Directories move whole — bundles all or nothing.** A directory moves
+  as one when everything in it on disk is intact package content. A bundle
+  (`.app`, `.framework`, `.jdk`, …) that changed since install — typical
+  after a self-update — stays *completely*: taking out the unchanged half
+  would leave a broken app (live: AusweisApp, Ziti Desktop Edge, both
+  updated through the App Store — nothing moves).
+- **Moved, not deleted.** `--apply` moves the roots with `sudo mv` into
+  `~/Library/Application Support/launchkeeper/quarantine/<stamp>-uninstall-<id>/files/<original path>`
+  — a rename on the same volume: instant, no extra space, owner and mode
+  preserved. The manifest is written before the first move.
+- **The receipt goes last, and only when nothing stays.** `pkgutil --forget`
+  runs only when no exclusive file of the package remains on disk; its
+  `.bom` and `.plist` are copied into the quarantine first, so `quarantine
+  restore` brings the receipt back too.
+- **Verified.** After `--apply` every root must be gone from its place and
+  present in the quarantine, and `pkgutil` must no longer know a forgotten
+  receipt — otherwise the run reports failure, and whatever moved comes
+  back with `quarantine restore`.
+- **Restore never overwrites.** Something new at an original place is
+  skipped and named. **Purge** (`sudo rm -rf` of one quarantine entry, after
+  checking it resolves inside the quarantine root) is the only deletion.
+
+Receipts whose files are all gone (`receipts --missing`) are the simple
+case: the plan is just the forget step. macOS may refuse to move an app
+bundle from `/Applications` unless your terminal has *App Management* (or
+Full Disk Access) permission — the verification then reports what did not
+move.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -673,6 +742,11 @@ orphans).
 
 ## Roadmap
 
+- **V0.8.0** ✅ — `uninstall <package-id>` by bill of materials (size +
+  checksum, root-only files proven via sudo, claims of every receipt
+  including Apple's, bundles all or nothing), moved into a quarantine with
+  manifest; `quarantine list / restore / purge`; receipt forgotten only when
+  nothing stays, with a copy
 - **V0.7.0** ✅ — control beyond launchd: pluginkit elections, user-crontab
   lines (marker, snapshot), loginwindow hooks (parked, snapshot), Application
   Firewall rules (block/allow via sudo); the control matrix names its

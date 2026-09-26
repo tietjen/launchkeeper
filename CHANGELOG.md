@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.8.0] — 2026-09-26
+
+### Added
+- `launchkeeper uninstall <package-id>`: receipt-based uninstall, dry-run by
+  default. Every BOM path is classified against the disk — intact (size +
+  POSIX `cksum` CRC, or symlink target), missing, modified, unreadable
+  (root-only), shared (listed by another receipt, Apple's included via
+  `pkgutil --file-info`, or a top-level location), protected (`/System`,
+  `/usr`, receipts DB, symlinked parent), foreign content, kept with a
+  changed bundle. Only intact exclusive content moves; directories move
+  whole when all their content does; bundles move all or nothing.
+  `--verify-as-root` proves root-only files in the dry-run; `--apply`
+  always does. `--list` prints every file, `--json` every classified path.
+- Quarantine instead of deletion: `--apply` moves the roots via `sudo mv`
+  into `~/Library/Application Support/launchkeeper/quarantine/<name>/files/`
+  with a manifest written first; `pkgutil --forget` only when nothing of the
+  package stays, after copying `.bom`/`.plist` into the quarantine.
+- `launchkeeper quarantine list | restore <name> | purge <name>` — restore
+  moves everything back and never overwrites; purge is the only real
+  deletion (`sudo rm -rf` of one entry inside the quarantine root).
+- `receipts` points at `uninstall` when receipts have missing files.
+
+### Found live (dry-runs on the maintainer's Mac)
+- Apple's `com.apple.files.data-template` lists `/Library/Printers/PPDs`;
+  the non-Apple index alone would have moved that standard folder with a
+  printer driver.
+- Self-updated apps (AusweisApp, Ziti Desktop Edge via the App Store)
+  differ from their receipts in hundreds of files — hence bundles all or
+  nothing.
+- A package that installs INTO a bundle (`com.oracle.jdk-27` → `jdk-27.jdk`)
+  has the BOM root `.` as its own directory.
+
+15 new tests (307 total).
+
 ## [0.7.0] — 2026-09-25
 
 ### Added

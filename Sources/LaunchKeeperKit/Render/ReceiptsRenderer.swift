@@ -67,6 +67,9 @@ public struct ReceiptsView: Codable, Equatable {
         lines.append("")
         lines.append("\(rows.count) receipts, \(missing) with missing files, "
             + "\(rows.filter { !$0.items.isEmpty }.count) behind inventory entries")
+        if missing > 0 {
+            lines.append("take a package away (dry-run first): launchkeeper uninstall <package id>")
+        }
         return lines.joined(separator: "\n")
     }
 }

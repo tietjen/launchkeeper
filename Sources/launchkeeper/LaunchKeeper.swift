@@ -405,6 +405,196 @@ struct ReceiptsCommand: ParsableCommand {
     }
 }
 
+// MARK: - V0.8 cleanup commands
+
+struct UninstallCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "uninstall",
+        abstract: """
+        Uninstall an installer package by its receipt (V0.8; dry-run by default).
+
+        Expert tool — you have been warned. Only files that still match the
+        package's bill of materials (size + checksum, link target) and that no
+        other receipt lists are taken away, and they are MOVED into the
+        quarantine, not deleted: `launchkeeper quarantine restore` puts them
+        back. Edited files, shared folders and /System stay. The receipt is
+        forgotten only when nothing of the package stays on disk (a copy is
+        kept). Address the package by its exact id — see `launchkeeper receipts`.
+        """)
+
+    @Argument(help: "exact package identifier, e.g. com.vendor.tool.pkg")
+    var packageIdentifier: String
+    @Flag(name: .customLong("apply"), help: "move into the quarantine (sudo) instead of only showing the plan")
+    var apply = false
+    @Flag(name: .customLong("list"), help: "print every file that would move, not just the move roots")
+    var list = false
+    @Flag(name: .customLong("verify-as-root"),
+          help: "prove root-only files now (sudo) so the dry-run shows exactly what --apply moves")
+    var verifyAsRoot = false
+    @Flag(name: .customLong("json"), help: "machine-readable output (includes every classified path)")
+    var json = false
+
+    mutating func run() throws {
+        let engine = CleanupEngine()
+        let result = engine.uninstall(packageIdentifier: packageIdentifier, apply: apply, verifyAsRoot: verifyAsRoot)
+        try printCleanup(result, engine: engine, list: list, json: json)
+    }
+}
+
+struct QuarantineCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "quarantine",
+        abstract: "What cleanup took away (V0.8): list, restore, or purge for good.",
+        subcommands: [QuarantineListCommand.self, QuarantineRestoreCommand.self, QuarantinePurgeCommand.self],
+        defaultSubcommand: QuarantineListCommand.self)
+}
+
+struct QuarantineListCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "list", abstract: "Quarantine entries, newest first.")
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        let engine = CleanupEngine()
+        let entries = engine.store.list()
+        if json { print(try JSONRenderer.encode(entries)); return }
+        guard !entries.isEmpty else {
+            print("quarantine is empty (\(engine.environment.quarantineRoot))")
+            return
+        }
+        for entry in entries {
+            print("\(entry.name)")
+            print("  \(entry.kind) \(entry.packageIdentifier ?? "-") \(entry.version ?? "") — \(entry.status), "
+                  + "\(entry.moves.count) path(s)" + (entry.forgot ? ", receipt forgotten (copy kept)" : ""))
+        }
+        print("\nrestore: launchkeeper quarantine restore <name> · delete for good: launchkeeper quarantine purge <name>")
+    }
+}
+
+struct QuarantineRestoreCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "restore",
+        abstract: "Move everything of one quarantine entry back (dry-run by default; never overwrites).")
+    @Argument(help: "quarantine entry name — see `launchkeeper quarantine list`")
+    var name: String
+    @Flag(name: .customLong("apply"), help: "move back (sudo) instead of only showing the plan")
+    var apply = false
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        let engine = CleanupEngine()
+        try printCleanup(engine.restore(name: name, apply: apply), engine: engine, list: false, json: json)
+    }
+}
+
+struct QuarantinePurgeCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "purge",
+        abstract: "Delete one quarantine entry for good — the only real deletion (dry-run by default).")
+    @Argument(help: "quarantine entry name — see `launchkeeper quarantine list`")
+    var name: String
+    @Flag(name: .customLong("apply"), help: "delete (sudo rm -rf inside the quarantine) — NOT restorable")
+    var apply = false
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        let engine = CleanupEngine()
+        try printCleanup(engine.purge(name: name, apply: apply), engine: engine, list: false, json: json)
+    }
+}
+
+private func printCleanup(_ result: CleanupResult, engine: CleanupEngine, list: Bool, json: Bool) throws {
+    if json {
+        struct PathJSON: Codable { var path: String; var kind: String; var status: String; var detail: String? }
+        struct CleanupJSON: Codable {
+            var operation: String
+            var target: String
+            var status: String
+            var planned: [String]
+            var applied: [String]
+            var notes: [String]
+            var quarantine: String?
+            var moveRoots: [String]?
+            var canForget: Bool?
+            var paths: [PathJSON]?
+            var undo: String?
+            var auditPath: String
+        }
+        print(try JSONRenderer.encode(CleanupJSON(
+            operation: result.operation, target: result.target, status: result.auditStatus,
+            planned: result.plan.map(\.display), applied: result.executed, notes: result.messages,
+            quarantine: result.quarantine, moveRoots: result.analysis?.moveRoots,
+            canForget: result.analysis?.canForget,
+            paths: result.analysis?.paths.map {
+                PathJSON(path: $0.path, kind: $0.kind.rawValue, status: $0.status.label, detail: $0.status.detail)
+            },
+            undo: result.undoHint, auditPath: engine.audit.url.path)))
+    } else {
+        if let analysis = result.analysis {
+            print("\(analysis.packageIdentifier) \(analysis.version ?? "")")
+            let labels = ["intact", "removable-directory", "missing", "modified", "unreadable", "foreign-content",
+                          "shared", "protected"]
+            print("  " + labels.map { "\($0) \(analysis.count($0))" }.joined(separator: " · "))
+            if !analysis.moveRoots.isEmpty {
+                print("would move into the quarantine (\(analysis.moveRoots.count) root(s), "
+                      + "\(analysis.movingFiles.count) file(s)/link(s)):")
+                for root in analysis.moveRoots {
+                    let inside = analysis.movingFiles.filter { $0 == root || $0.hasPrefix(root + "/") }.count
+                    print("  \(root)" + (inside > 1 ? "   (\(inside) files)" : ""))
+                }
+                if list {
+                    print("every file/link:")
+                    for file in analysis.movingFiles { print("    \(file)") }
+                }
+            }
+            let kept = analysis.paths.filter {
+                if case .modified = $0.status { return true }
+                if case .foreignContent = $0.status { return true }
+                if $0.status == .unreadable { return true }
+                if case .protected(let why) = $0.status, why.hasPrefix("a parent") { return true }
+                return false
+            }
+            if !kept.isEmpty {
+                print("stays (\(kept.count)):")
+                for path in kept.prefix(25) { print("  \(path.path) — \(path.status.label): \(path.status.detail ?? "")") }
+                if kept.count > 25 { print("  … \(kept.count - 25) more (--json)") }
+            }
+            print(analysis.canForget ? "receipt: would be forgotten (a copy goes into the quarantine)"
+                                     : "receipt: stays")
+        }
+        switch result.status {
+        case .planned:
+            print("\nDRY-RUN — nothing executed (dry-run is the default).")
+            print("plan:")
+            for (index, command) in result.plan.enumerated() where index < 30 || list {
+                print("  \(index + 1). \(command.display.count > 240 ? String(command.display.prefix(240)) + " …" : command.display)")
+                print("      \(command.description)")
+            }
+            if result.plan.count > 30 && !list { print("  … \(result.plan.count - 30) more steps (--list)") }
+            for line in result.messages { print("  \(line)") }
+            print("execute for real with: --apply")
+        case .appliedOk:
+            print("applied (\(result.executed.count) command(s)), verified afterwards.")
+            for line in result.messages { print("  \(line)") }
+            if let undo = result.undoHint { print("undo with: \(undo)") }
+        case .appliedFailed(let detail):
+            print("FAILED (\(detail)) after \(result.executed.count) command(s):")
+            for line in result.messages { print("  \(line)") }
+            if let undo = result.undoHint { print("whatever moved comes back with: \(undo)") }
+        case .refused(let reason):
+            print("REFUSED — \(reason)")
+            for line in result.messages where !line.hasPrefix("refused:") { print("  \(line)") }
+        }
+        print("audit: \(engine.audit.url.path)")
+    }
+    switch result.status {
+    case .appliedFailed, .refused: throw ExitCode(1)
+    case .planned, .appliedOk: break
+    }
+}
+
 // MARK: - V0.2 remediation commands
 
 /// Engine-backed display + JSON for disable/enable. All decisions already
@@ -747,22 +937,25 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation (V0.7.0).
+        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
         .plist inside the launch directories, and only after a pre-delete
         backup — working components are disabled instead, never deleted.
         com.apple.* labels and /System are refused by construction, no flag
-        bypasses the gate.
+        bypasses the gate. `uninstall` (V0.8) moves only files that still
+        match a package's bill of materials into a quarantine — restorable;
+        `quarantine purge` is the one real deletion.
         """,
-        version: "0.7.0",
+        version: "0.8.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,
-                      RemoveCommand.self, ResetBtmCommand.self],
+                      RemoveCommand.self, ResetBtmCommand.self,
+                      UninstallCommand.self, QuarantineCommand.self],
         defaultSubcommand: ListCommand.self
     )
 }
