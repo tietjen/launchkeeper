@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.2)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.9.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -253,6 +253,11 @@ launchkeeper remove <leftover>                       # V0.8.1: helper without a 
                                                      # dead paths.d file → into the quarantine
 launchkeeper leftovers [--all] [--json]              # V0.8.2: what gone apps left behind (read-only)
 launchkeeper leftovers <bundle-id> [--apply]         # move one gone app's leftovers into the quarantine
+
+# V0.9 — observe (read-only)
+launchkeeper watch                                   # report new / removed / changed autostart entries live
+launchkeeper watch --notify --interval 300           # + macOS notifications; full rescan every 5 min
+launchkeeper watch --json                            # JSON lines (also logged to ~/Library/Logs/launchkeeper/watch.log)
 
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
@@ -699,6 +704,59 @@ quarantine — as you for `~/Library`, via sudo for `/Library`. Containers of
 other apps can need *App Data* or Full Disk Access for your terminal; the
 verification names what did not move.
 
+## Watch (V0.9)
+
+`launchkeeper watch` says it when something new may start automatically —
+the part BlockBlock/KnockKnock cover and Autoruns does not. Read-only.
+
+- **Baseline, then differences.** The first complete scan is the reference;
+  every rescan is compared with the previous one by stable entry key (the
+  `diff` of V0.6.1): `NEW`, `GONE`, `CHANGED` with the fields that moved.
+- **Triggers.** FSEvents on the autostart locations — launch directories,
+  PrivilegedHelperTools, StartupItems, SystemExtensions,
+  SecurityAgentPlugins, `/etc/paths.d`, the loginwindow plists, shell
+  profiles and the top level of `/Applications` — start a rescan after a
+  5-second quiet period; writes deep inside app bundles or other
+  preference files are ignored. A full rescan also runs every `--interval`
+  seconds (default 300) for what has no file to watch: Background Task
+  Management, app extensions, crontab, the firewall.
+- **Cold BTM dumps.** A rescan set off by a file reuses the last
+  `sfltool dumpbtm` of the session (a cold one can take minutes); the
+  interval rescan refreshes it.
+- **No false "gone".** An incomplete scan (BTM timeout, pluginkit failure)
+  is reported as `skipped` and never compared — the baseline stays.
+- **Configuration, not runtime.** A process that starts listening is not a
+  new autostart entry; listeners appear only with `--state` (which also
+  adds loaded/running changes). Apple internals only with `--all`.
+- **Where it goes.** Terminal lines (or `--json`), JSON lines appended to
+  `~/Library/Logs/launchkeeper/watch.log`, and with `--notify` a macOS
+  notification per change (the text is passed to `osascript` as an
+  argument, never as script source).
+
+Live check (2026-09-26): an empty `~/.zlogin` was reported `NEW` one
+second after it appeared and `GONE` after it was removed.
+
+To keep it running, write a LaunchAgent yourself (launchkeeper never
+installs one on its own) — e.g. `~/Library/LaunchAgents/local.launchkeeper.watch.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.launchkeeper.watch</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/launchkeeper</string><string>watch</string><string>--notify</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/launchkeeper-watch.out</string>
+  <key>StandardErrorPath</key><string>/tmp/launchkeeper-watch.err</string>
+</dict></plist>
+```
+
+then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.launchkeeper.watch.plist`.
+It will, of course, show up in its own inventory.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -803,6 +861,10 @@ orphans).
 
 ## Roadmap
 
+- **V0.9.0** ✅ — `watch`: FSEvents on the autostart locations + interval
+  rescans, stable-key comparison against a baseline, incomplete scans
+  skipped, BTM dump reused for file-triggered rescans, notifications and a
+  JSON-lines log
 - **V0.8.2** ✅ — `leftovers`: what gone apps left in `~/Library` and
   `/Library`, gone only on three negative sources plus positive app
   evidence, hard exclusions for Apple, app groups, CUPS and framework

@@ -442,6 +442,152 @@ struct UninstallCommand: ParsableCommand {
     }
 }
 
+// MARK: - V0.9 observe
+
+struct WatchCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "watch",
+        abstract: """
+        Report new, removed and changed autostart entries as they happen (V0.9, read-only).
+
+        The first complete scan is the baseline. File-system events on the
+        autostart locations (launch directories, helpers, StartupItems,
+        system extensions, paths.d, loginwindow, /Applications) trigger a
+        rescan after a short quiet period; a full rescan also runs every
+        --interval seconds for what has no file to watch (Background Task
+        Management, extensions, crontab, firewall). An incomplete scan is
+        skipped, never reported as "removed". Events go to the terminal and,
+        as JSON lines, to ~/Library/Logs/launchkeeper/watch.log. Ctrl-C ends it.
+        """)
+
+    @Option(name: .customLong("interval"), help: "seconds between full rescans (default 300, minimum 30)")
+    var interval: Int = 300
+    @Flag(name: .customLong("notify"), help: "also post a macOS notification for every change")
+    var notify = false
+    @Flag(name: .customLong("json"), help: "print events as JSON lines")
+    var json = false
+    @Flag(name: .customLong("all"), help: "include Apple internals")
+    var all = false
+    @Flag(name: .customLong("state"), help: "also report loaded/running changes (noisy)")
+    var state = false
+    @Flag(name: .customLong("no-fsevents"), help: "rescan on the interval only")
+    var noFSEvents = false
+    @Flag(name: .customLong("verbose"), help: "also print rescans that found no change")
+    var verbose = false
+
+    mutating func run() throws {
+        let session = WatchSession(includeAll: all, includeState: state, json: json, notify: notify, verbose: verbose)
+        print("launchkeeper watch — baseline scan first (a cold Background Task Management dump can take minutes)…")
+        fflush(stdout)
+        session.start(interval: max(30, interval), fsevents: !noFSEvents)
+        withExtendedLifetime(session) { dispatchMain() }
+    }
+}
+
+/// All state lives on one serial queue: FSEvents callbacks, the interval
+/// timer and the scans themselves — so a scan never overlaps another and
+/// events that arrive while scanning collapse into one rescan.
+final class WatchSession: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "launchkeeper.watch")
+    private let watcher: InventoryWatcher
+    private let log = WatchLog(path: LaunchKeeperPaths.logs(home: NSHomeDirectory()) + "/watch.log")
+    private let runner = SystemCommandRunner()
+    private let json: Bool
+    private let notify: Bool
+    private let verbose: Bool
+    private var pending: DispatchWorkItem?
+    private var reasons: [String] = []
+    private var timer: DispatchSourceTimer?
+    private var triggers: FileSystemTriggers?
+    /// Rescans set off by files reuse the last BTM dump (a cold one takes
+    /// minutes); the interval rescan refreshes it.
+    private let btmCache = BTMDumpCache()
+
+    init(includeAll: Bool, includeState: Bool, json: Bool, notify: Bool, verbose: Bool) {
+        self.json = json
+        self.notify = notify
+        self.verbose = verbose
+        let cache = btmCache
+        watcher = InventoryWatcher(includeAll: includeAll, includeState: includeState) {
+            ScanCoordinator(environment: ScanEnvironment(btmCache: cache)).perform(options: ScanOptions())
+        }
+    }
+
+    func start(interval: Int, fsevents: Bool) {
+        queue.async { self.emit(self.watcher.tick(trigger: "start")) }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .seconds(interval), repeating: .seconds(interval))
+        timer.setEventHandler { self.schedule("interval", after: 0) }
+        timer.resume()
+        self.timer = timer
+        guard fsevents else { return }
+        let fs = FileSystemTriggers(paths: WatchPaths(), queue: queue) { path in
+            self.schedule("fsevents: \(path)", after: 5)
+        }
+        if !fs.start() {
+            FileHandle.standardError.write(Data("FSEvents unavailable — interval rescans only\n".utf8))
+        }
+        triggers = fs
+    }
+
+    /// On the queue: collect reasons, restart the quiet period.
+    private func schedule(_ reason: String, after delay: TimeInterval) {
+        reasons.append(reason)
+        pending?.cancel()
+        let work = DispatchWorkItem { [self] in
+            let trigger = reasons.count == 1 ? reasons[0] : "\(reasons[0]) (+\(reasons.count - 1) more)"
+            btmCache.preferCached = !reasons.contains("interval")
+            reasons.removeAll()
+            let events = watcher.tick(trigger: trigger)
+            if events.isEmpty, verbose {
+                print("[\(ISO8601DateFormatter().string(from: Date()))] rescan after \(trigger): no change")
+                fflush(stdout)
+            }
+            emit(events)
+        }
+        pending = work
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func emit(_ events: [WatchEvent]) {
+        for event in events {
+            log.append(event)
+            if json {
+                if let data = try? JSONEncoder().encode(event) { print(String(decoding: data, as: UTF8.self)) }
+            } else {
+                print("[\(event.timestamp)] \(event.summary)")
+            }
+            if notify, event.kind != .baseline, event.kind != .skipped {
+                // The text travels as argv, never inside the AppleScript source.
+                _ = runner.run(command: "/usr/bin/osascript",
+                               arguments: ["-e", "on run argv", "-e",
+                                           "display notification (item 2 of argv) with title (item 1 of argv)",
+                                           "-e", "end run", "launchkeeper", event.summary], timeout: 10)
+            }
+        }
+        fflush(stdout)
+    }
+}
+
+/// JSON lines, append-only, next to the audit log.
+struct WatchLog {
+    let path: String
+
+    func append(_ event: WatchEvent) {
+        guard let data = try? JSONEncoder().encode(event) else { return }
+        let line = data + Data("\n".utf8)
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        if let handle = FileHandle(forWritingAtPath: path) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: line)
+        } else {
+            fm.createFile(atPath: path, contents: line)
+        }
+    }
+}
+
 struct LeftoversCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "leftovers",
@@ -1022,7 +1168,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.2).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.9.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1033,14 +1179,15 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.8.2",
+        version: "0.9.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,
                       RemoveCommand.self, ResetBtmCommand.self,
-                      UninstallCommand.self, LeftoversCommand.self, QuarantineCommand.self],
+                      UninstallCommand.self, LeftoversCommand.self, QuarantineCommand.self,
+                      WatchCommand.self],
         defaultSubcommand: ListCommand.self
     )
 }

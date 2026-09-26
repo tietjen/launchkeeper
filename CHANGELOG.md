@@ -5,7 +5,21 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
-## [Unreleased]
+## [0.9.0] — 2026-09-26
+
+### Added
+- `launchkeeper watch` — live report of new, removed and changed autostart
+  entries. First complete scan = baseline, comparison by stable entry key.
+  FSEvents on the autostart locations (launch dirs, helpers, StartupItems,
+  system extensions, authorization plugins, paths.d, loginwindow plists,
+  shell profiles, top level of /Applications) trigger a rescan after a
+  5-second quiet period; a full rescan runs every `--interval` seconds
+  (default 300). Incomplete scans are `skipped`, never reported as removed.
+  `--notify` (macOS notification, text as argv), `--json`, `--all`,
+  `--state` (listeners, loaded/running), `--verbose`, `--no-fsevents`.
+  Events are appended as JSON lines to `~/Library/Logs/launchkeeper/watch.log`.
+- In-process BTM dump cache (`BTMDumpCache`): rescans set off by files
+  reuse the last `sfltool dumpbtm`, the interval rescan refreshes it.
 
 ### Fixed
 - The control hint for system extensions no longer offers
@@ -14,6 +28,8 @@ under the former name **btmctl**.
   route (host app to the Trash, or the vendor's uninstaller; reinstall the
   app first when it is gone) and says when an extension waiting for user
   approval was never active.
+
+9 new tests (326 total).
 
 ## [0.8.2] — 2026-09-26
 

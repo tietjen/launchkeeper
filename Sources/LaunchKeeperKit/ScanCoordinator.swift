@@ -78,6 +78,23 @@ public struct ScanReport {
     }
 }
 
+/// The last successful `sfltool dumpbtm`, kept in-process (V0.9). A cold
+/// dump can take minutes; `watch` reuses it for rescans that files set off
+/// and refreshes it on its interval. Nothing is written to disk.
+public final class BTMDumpCache: @unchecked Sendable {
+    public private(set) var text: String?
+    public private(set) var taken: Date?
+    /// Set by the caller before a scan: use the kept dump when there is one.
+    public var preferCached = false
+
+    public init() {}
+
+    func store(_ text: String, at date: Date = Date()) {
+        self.text = text
+        taken = date
+    }
+}
+
 /// Everything a scan needs, injectable so tests never touch the real system.
 public struct ScanEnvironment {
     public var runner: CommandRunner
@@ -87,14 +104,18 @@ public struct ScanEnvironment {
     /// Tests point the legacy stage at temp loginwindow plists (V0.7) —
     /// nil = the real locations under `home` and /Library.
     public var legacyScanner: LegacyScanner?
+    /// V0.9: reuse / keep the BTM dump across scans of one process.
+    public var btmCache: BTMDumpCache?
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
                 home: String = NSHomeDirectory(),
                 uid: Int = Int(getuid()),
-                legacyScanner: LegacyScanner? = nil) {
+                legacyScanner: LegacyScanner? = nil,
+                btmCache: BTMDumpCache? = nil) {
         self.runner = runner; self.fileManager = fileManager
         self.home = home; self.uid = uid
         self.legacyScanner = legacyScanner
+        self.btmCache = btmCache
     }
 }
 
@@ -173,10 +194,16 @@ public struct ScanCoordinator {
                 FileHandle.standardError.write(Data(("waiting for sfltool dumpbtm — the BTM daemon's "
                     + "first answer after idle can take a minute or two (budget \(Int(budget)) s)\n").utf8))
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: hint)
-            let result = env.runner.run(command: "/usr/bin/sfltool",
-                                        arguments: ["dumpbtm"], timeout: budget)
-            hint.cancel()
+            let result: CommandResult
+            if let cache = env.btmCache, cache.preferCached, let text = cache.text, let taken = cache.taken {
+                result = CommandResult(exitCode: 0, stdout: text, stderr: "")
+                checks.append("sfltool dumpbtm: reused from \(ISO8601DateFormatter().string(from: taken))")
+            } else {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: hint)
+                result = env.runner.run(command: "/usr/bin/sfltool", arguments: ["dumpbtm"], timeout: budget)
+                hint.cancel()
+                if result.exitCode == 0 { env.btmCache?.store(result.stdout) }
+            }
             if result.exitCode == 0 {
                 let (records, parseWarnings) = BTMDumpParser.parse(result.stdout)
                 btm = records

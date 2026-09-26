@@ -6,7 +6,7 @@ import Foundation
 // is set up to run; `--state` adds loaded/running.
 
 public struct InventoryDiff: Codable, Equatable {
-    public struct Change: Codable, Equatable {
+    public struct Change: Codable, Equatable, Sendable {
         public var field: String
         public var before: String
         public var after: String
