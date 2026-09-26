@@ -1,6 +1,7 @@
 import ArgumentParser
 import LaunchKeeperKit
 import Foundation
+import AppKit
 
 // launchkeeper V0.4 — read-only inventory (now with app correlation) + GATED
 // remediation, including the one file-deleting command — kept deliberately
@@ -439,6 +440,85 @@ struct UninstallCommand: ParsableCommand {
         let result = engine.uninstall(packageIdentifier: packageIdentifier, apply: apply, verifyAsRoot: verifyAsRoot)
         try printCleanup(result, engine: engine, list: list, json: json)
     }
+}
+
+struct LeftoversCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "leftovers",
+        abstract: """
+        What gone apps left behind (V0.8.2): preferences, caches, support folders, containers.
+
+        Without an argument: a read-only list. An entry counts only when its
+        name is a bundle id, and the app counts as gone only when the
+        application folders, LaunchServices and Spotlight all agree and no
+        running app or same-vendor app claims it. With a bundle id: move that
+        app's leftovers into the quarantine (dry-run by default; sudo only
+        for /Library). `launchkeeper quarantine restore` brings them back.
+        """)
+
+    @Argument(help: "exact bundle identifier of a gone app — see `launchkeeper leftovers`")
+    var bundleIdentifier: String?
+    @Flag(name: .customLong("apply"), help: "move into the quarantine instead of only showing the plan")
+    var apply = false
+    @Flag(name: .customLong("all"), help: "list also entries whose app is present or unknown, with the reason")
+    var all = false
+    @Flag(name: .customLong("json"), help: "machine-readable output")
+    var json = false
+
+    mutating func run() throws {
+        let engine = CleanupEngine()
+        let sources = liveAppPresenceSources()
+        if let id = bundleIdentifier {
+            try printCleanup(engine.removeAppLeftovers(bundleIdentifier: id, sources: sources, apply: apply),
+                             engine: engine, list: false, json: json)
+            return
+        }
+        let candidates = engine.leftoverScanner().scan(sources: sources)
+        let shown = all ? candidates : candidates.filter { $0.presence.label == "gone" }
+        if json {
+            struct Row: Codable {
+                var bundleIdentifier: String; var presence: String; var reason: String
+                var bytes: UInt64; var paths: [LeftoverPath]
+            }
+            print(try JSONRenderer.encode(shown.map { candidate -> Row in
+                let reason: String
+                switch candidate.presence {
+                case .present(let why), .unknown(let why): reason = why
+                case .noAppEvidence: reason = "no sign it was an app"
+                case .gone(let proofs): reason = proofs.joined(separator: "; ")
+                    + "; was an app: " + candidate.appEvidence.joined(separator: ", ")
+                }
+                return Row(bundleIdentifier: candidate.bundleIdentifier, presence: candidate.presence.label,
+                           reason: reason, bytes: candidate.totalBytes, paths: candidate.paths)
+            }))
+            return
+        }
+        for candidate in shown {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(candidate.totalBytes), countStyle: .file)
+            var line = "\(candidate.bundleIdentifier)  [\(candidate.presence.label)]  \(size)"
+            if case .present(let why) = candidate.presence { line += " — \(why)" }
+            if case .unknown(let why) = candidate.presence { line += " — \(why)" }
+            if case .gone = candidate.presence { line += " — was an app: " + candidate.appEvidence.joined(separator: ", ") }
+            print(line)
+            for path in candidate.paths { print("    \(path.kind): \(path.path)" + (path.needsRoot ? "  (sudo)" : "")) }
+        }
+        let gone = candidates.filter { $0.presence.label == "gone" }
+        print("\n\(gone.count) gone app(s) with leftovers, \(candidates.count) bundle-id entries checked"
+              + (all ? "" : " (--all shows the rest)"))
+        if !gone.isEmpty { print("take them away (dry-run first): launchkeeper leftovers <bundle-id>") }
+    }
+}
+
+/// LaunchServices and the running apps through AppKit — only the CLI links it.
+private func liveAppPresenceSources() -> AppPresenceSources {
+    let runner = SystemCommandRunner()
+    var installed = SystemAppPresence.installedBundleIdentifiers(home: NSHomeDirectory())
+    installed.formUnion(SystemAppPresence.extensionIdentifiers(runner: runner))
+    installed.formUnion(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+    return AppPresenceSources(
+        installed: installed,
+        launchServices: { id in NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id).first?.path },
+        spotlight: SystemAppPresence.spotlight(runner: runner))
 }
 
 struct QuarantineCommand: ParsableCommand {
@@ -942,7 +1022,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.1).
+        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.2).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -953,14 +1033,14 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.8.1",
+        version: "0.8.2",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
                       DisableCommand.self, EnableCommand.self,
                       BackupCommand.self, RestoreCommand.self,
                       RemoveCommand.self, ResetBtmCommand.self,
-                      UninstallCommand.self, QuarantineCommand.self],
+                      UninstallCommand.self, LeftoversCommand.self, QuarantineCommand.self],
         defaultSubcommand: ListCommand.self
     )
 }

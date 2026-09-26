@@ -368,6 +368,105 @@ public struct CleanupEngine {
                       executed: executed, quarantine: name, undo: undo)
     }
 
+    // MARK: - app leftovers (V0.8.2)
+
+    public func leftoverScanner() -> AppLeftoverScanner {
+        AppLeftoverScanner(disk: environment.disk, home: environment.home)
+    }
+
+    /// `leftovers <bundle-id>`: re-scan that one id NOW, require the gone
+    /// verdict of all sources, then move every leftover path into the
+    /// quarantine — as the user for ~/Library, via sudo for /Library.
+    public func removeAppLeftovers(bundleIdentifier id: String, sources: AppPresenceSources,
+                                   apply: Bool) -> CleanupResult {
+        let target = "app:" + id
+        func finish(_ status: RemediationStatus, _ messages: [String], plan: [PlannedCommand] = [],
+                    executed: [String] = [], quarantine: String? = nil, undo: String? = nil) -> CleanupResult {
+            let result = CleanupResult(operation: "leftovers", target: target, status: status, messages: messages,
+                                       plan: plan, executed: executed, analysis: nil, quarantine: quarantine,
+                                       undoHint: undo)
+            audit.append(operation: "leftovers", target: target + (quarantine.map { " → \($0)" } ?? ""),
+                         status: result.auditStatus)
+            return result
+        }
+        guard AppLeftoverLocations.isBundleIdentifier(id), !AppLeftoverLocations.isExcluded(id) else {
+            return finish(.refused("not a bundle identifier"),
+                          ["refused: '\(id)' is not a (non-Apple) bundle identifier — exact ids: `launchkeeper leftovers`"])
+        }
+        let scanner = leftoverScanner()
+        let paths = scanner.candidates()[id] ?? []
+        guard !paths.isEmpty else {
+            return finish(.refused("no leftovers"), ["refused: nothing named '\(id)' in the leftover locations"])
+        }
+        let candidate = scanner.verdict(id, paths: paths, sources: sources)
+        switch candidate.presence {
+        case .noAppEvidence:
+            return finish(.refused("no sign it was an app"),
+                          ["refused: no app found — but nothing shows '\(id)' ever was one (no container, saved "
+                           + "state, WebKit data or app preferences); a tool's or framework's data stays"])
+        case .present(let why):
+            return finish(.refused("app present (\(why))"),
+                          ["refused: the app is not gone — \(why). Leftovers of installed apps are their data"])
+        case .unknown(let why):
+            return finish(.refused("presence unknown"), ["refused: \(why)"])
+        case .gone(let proofs):
+            var messages = ["app gone: " + proofs.joined(separator: "; "),
+                            "was an app: " + candidate.appEvidence.joined(separator: ", ")]
+            let total = paths.reduce(UInt64(0)) { $0 + $1.bytes }
+            messages.append("\(paths.count) path(s), \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))")
+            let name = store.makeName(kind: "leftovers", subject: id)
+            var plan: [PlannedCommand] = []
+            for path in paths {
+                let parent = (path.path as NSString).deletingLastPathComponent
+                let destination = store.quarantinedPath(name, original: parent)
+                let mkdir = ["/bin/mkdir", "-p", "--", destination]
+                let mv = ["/bin/mv", "--", environment.disk.disk(path.path), destination + "/"]
+                if path.needsRoot {
+                    plan.append(PlannedCommand(command: "/usr/bin/sudo", arguments: mkdir, description: "quarantine directory"))
+                    plan.append(PlannedCommand(command: "/usr/bin/sudo", arguments: mv,
+                                               description: "move \(path.kind) (\(path.bytes) bytes) — via sudo"))
+                } else {
+                    plan.append(PlannedCommand(command: mkdir[0], arguments: Array(mkdir.dropFirst()),
+                                               description: "quarantine directory"))
+                    plan.append(PlannedCommand(command: mv[0], arguments: Array(mv.dropFirst()),
+                                               description: "move \(path.kind) (\(path.bytes) bytes)"))
+                }
+            }
+            guard apply else {
+                return finish(.planned, messages + ["dry-run: nothing moved (add --apply)"], plan: plan)
+            }
+            var manifest = QuarantineManifest(
+                name: name, kind: "app-leftovers", createdAt: ISO8601DateFormatter().string(from: Date()),
+                toolVersion: QuarantineStore.toolVersion, packageIdentifier: nil, version: nil,
+                moves: paths.map { QuarantineMove(original: $0.path,
+                                                  quarantined: store.quarantinedPath(name, original: $0.path),
+                                                  kind: $0.kind) },
+                receiptCopies: [], forgot: false, status: "planned", notes: [id] + proofs)
+            if let failure = store.write(manifest) {
+                return finish(.refused(failure.reason), ["refused: \(failure.reason) — nothing moved"])
+            }
+            audit.append(operation: "quarantine", target: name, status: "created")
+            let (executed, failure) = run(plan, timeout: environment.interactiveTimeout)
+            var problems = failure.map { [$0] } ?? []
+            for move in manifest.moves {
+                if environment.disk.exists(move.original) { problems.append("still in place: \(move.original)") }
+                if (try? environment.disk.fileManager.attributesOfItem(atPath: move.quarantined)) == nil {
+                    problems.append("not in the quarantine: \(move.original)")
+                }
+            }
+            let undo = "launchkeeper quarantine restore \(name)"
+            manifest.status = problems.isEmpty ? "applied-ok" : "applied-fail(\(problems.count))"
+            _ = store.write(manifest)
+            guard problems.isEmpty else {
+                return finish(.appliedFailed(problems[0]), messages + problems
+                              + ["containers of other apps may need App Data / Full Disk Access for your terminal"],
+                              plan: plan, executed: executed, quarantine: name, undo: undo)
+            }
+            return finish(.appliedOk, messages + ["verified: \(paths.count) path(s) in the quarantine"], plan: plan,
+                          executed: executed, quarantine: name, undo: undo)
+        }
+    }
+
     // MARK: - restore
 
     public func restore(name: String, apply: Bool) -> CleanupResult {

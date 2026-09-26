@@ -5,6 +5,32 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.8.2] — 2026-09-26
+
+### Added
+- `launchkeeper leftovers` — read-only report of what gone apps left in
+  `~/Library` (Application Support, Caches, Preferences, Saved Application
+  State, HTTPStorages, WebKit, Logs, Cookies, Containers, Application
+  Scripts) and `/Library` (Application Support, Caches, Preferences, Logs).
+  An entry counts only when named by a bundle id; the app is gone only when
+  the application folders, LaunchServices (`NSWorkspace`) and Spotlight find
+  nothing and nothing running or registered claims the id (Spotlight silent
+  = unknown); same-vendor apps still installed = unknown; and something must
+  show it was an app (container, application scripts, saved state, WebKit
+  data, GUI preference keys) — otherwise `no-app-evidence`. `--all` shows
+  every verdict with its reason, `--json` for scripts.
+- `launchkeeper leftovers <bundle-id> [--apply]` moves one gone app's
+  leftovers into the quarantine (sudo only for `/Library`).
+
+### Found live
+- The first report listed `org.cups.printers` (`/Library/Preferences`, the
+  printer setup), `systemgroup.com.apple.*`, Team-ID app groups of installed
+  apps (Ziti, Things, Telegram), CLI-tool caches and log-file names — hence
+  the hard exclusions and the app-evidence requirement. On the
+  maintainer's Mac: 247 bundle-id entries, 38 gone apps with leftovers.
+
+5 new tests (317 total).
+
 ## [0.8.1] — 2026-09-26
 
 ### Added

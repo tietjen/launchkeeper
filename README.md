@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.1)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.2)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -251,6 +251,8 @@ launchkeeper quarantine restore <name> [--apply]     # move it all back (never o
 launchkeeper quarantine purge <name> [--apply]       # delete one entry for good — the only real deletion
 launchkeeper remove <leftover>                       # V0.8.1: helper without a job, StartupItem,
                                                      # dead paths.d file → into the quarantine
+launchkeeper leftovers [--all] [--json]              # V0.8.2: what gone apps left behind (read-only)
+launchkeeper leftovers <bundle-id> [--apply]         # move one gone app's leftovers into the quarantine
 
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
@@ -661,6 +663,38 @@ Shell profiles (`.zshrc` …) stay untouched: launchkeeper never edits shell
 files. System extensions without their app are not files launchkeeper
 takes: `systemextensionsctl uninstall <team> <bundle-id>` (SIP rules apply).
 
+### App leftovers (V0.8.2)
+
+`launchkeeper leftovers` lists what apps left behind after they were
+deleted — preferences, caches, Application Support, saved state, HTTP
+storage, WebKit data, logs, cookies, sandbox containers and application
+scripts in `~/Library`, plus Application Support, caches, preferences and
+logs in `/Library`. This is user data, so the bar is the highest in the tool:
+
+- **Named by a bundle id** (three or more parts). Never: anything with
+  `com.apple` in it, `group.`/`systemgroup.` and Team-ID-scoped app groups
+  (`ABCDE12345.vendor.group` — shared by a vendor's apps; live: Ziti, Things),
+  `org.cups.*` (live: the first report listed `org.cups.printers`, the
+  system's printer setup), shared framework helpers (`org.sparkle-project.*`),
+  and file-name debris (`warp.log.old.0`, `…compiled.cache`).
+- **The app is gone** only when the application folders (two levels deep,
+  with login items and helpers inside apps), LaunchServices and Spotlight
+  all find nothing, it is not running and no registered extension has the
+  id. A Spotlight that does not answer means *unknown*, never gone.
+  Helper domains of an installed app (`com.vendor.app.helper`) are present;
+  another app of the same vendor still installed makes it *unknown* — vendor
+  data may be shared (`com.microsoft.office` next to Word).
+- **It was an app**: a sandbox container, an application scripts folder,
+  saved window state, WebKit data, or preferences with keys only GUI apps
+  write (window frames, status item positions, Sparkle). Without that the
+  verdict is *no-app-evidence* — a CLI tool's cache or a framework's
+  defaults domain stays.
+
+`leftovers <bundle-id>` re-checks that one id and moves every path into the
+quarantine — as you for `~/Library`, via sudo for `/Library`. Containers of
+other apps can need *App Data* or Full Disk Access for your terminal; the
+verification names what did not move.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -765,6 +799,10 @@ orphans).
 
 ## Roadmap
 
+- **V0.8.2** ✅ — `leftovers`: what gone apps left in `~/Library` and
+  `/Library`, gone only on three negative sources plus positive app
+  evidence, hard exclusions for Apple, app groups, CUPS and framework
+  helpers; `leftovers <bundle-id>` into the quarantine — V0.8 is complete
 - **V0.8.1** ✅ — `remove` quarantines provable leftovers: privileged
   helpers without a job, StartupItems, paths.d/manpaths.d files whose every
   entry is gone (control mechanism `quarantine`, `removable` in the matrix)
