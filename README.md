@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.9.0)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.9.1)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -258,6 +258,8 @@ launchkeeper leftovers <bundle-id> [--apply]         # move one gone app's lefto
 launchkeeper watch                                   # report new / removed / changed autostart entries live
 launchkeeper watch --notify --interval 300           # + macOS notifications; full rescan every 5 min
 launchkeeper watch --json                            # JSON lines (also logged to ~/Library/Logs/launchkeeper/watch.log)
+launchkeeper list --root "<backup>/… - Data"         # V0.9.1: offline analysis of another system's files
+launchkeeper snapshot save --root <root> --name old  # … and snapshot it for `diff`
 
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
@@ -757,6 +759,40 @@ installs one on its own) — e.g. `~/Library/LaunchAgents/local.launchkeeper.wat
 then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.launchkeeper.watch.plist`.
 It will, of course, show up in its own inventory.
 
+## Offline analysis: `--root` (V0.9.1)
+
+`launchkeeper list --root <folder>` inventories **another system from its
+files** — a Time Machine backup (the `… - Data` folder of a backup), a Mac
+in target disk mode, a mounted disk image. `snapshot save --root` stores
+it for `diff`.
+
+- **Every path below the root.** A file manager maps each absolute path
+  into the root (`/Applications/X.app` is read as `<root>/Applications/X.app`;
+  `/etc`, `/var`, `/tmp` fall back to `<root>/private/…` on a Data volume),
+  so orphan detection, app context and symlinks are judged against *that*
+  system, not this one.
+- **Every user.** All homes under `<root>/Users` (not Shared) — their
+  LaunchAgents, loginwindow hooks, plugin folders and shell profiles.
+- **Files only.** What runs: launch plists, privileged helpers (their
+  embedded Info.plist via `launchctl plist <file>`), StartupItems, hooks,
+  rc/emond files, plugin directories, shell profiles and `paths.d`, code
+  signatures (`codesign` on the file below the root). What only a running
+  system can answer is listed as *not available offline* and never taken
+  from this machine — launchd state, Background Task Management,
+  app-extension elections, system extensions, crontab/at/pmset, network,
+  receipts, Spotlight. A runner allowlist enforces that: only `codesign`
+  (never signing) and `launchctl plist` reach the system.
+- **Nothing is switchable** — every entry is display-only; launchkeeper
+  controls the running system only.
+- Reading Time Machine backups needs **Full Disk Access** for your
+  terminal; without it `--root` says so.
+
+Cross-check on the maintainer's Mac: `list --root /` found the same 23
+launch plists and the same orphans as the live scan, in 4 seconds.
+A `diff` between an offline snapshot and a live one shows the live-only
+layers as added — compare offline with offline (two backups), or read the
+launch-item rows.
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -861,6 +897,9 @@ orphans).
 
 ## Roadmap
 
+- **V0.9.1** ✅ — `--root` offline analysis (Time Machine backup, target
+  disk mode, disk image): files only, every user home, paths mapped below
+  the root, live tools refused by an allowlist — V0.9 is complete
 - **V0.9.0** ✅ — `watch`: FSEvents on the autostart locations + interval
   rescans, stable-key comparison against a baseline, incomplete scans
   skipped, BTM dump reused for file-triggered rescans, notifications and a

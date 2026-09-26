@@ -30,8 +30,25 @@ import AppKit
 /// and `--system` narrow the ROWS, never the scan (V0.4.3 — before, `list
 /// --user` renumbered the inventory and its ids meant something else to
 /// `disable`/`remove`).
-private func runScan() -> ScanReport {
-    ScanCoordinator().perform(options: ScanOptions())
+private func runScan(root: String? = nil) throws -> ScanReport {
+    guard let root else { return ScanCoordinator().perform(options: ScanOptions()) }
+    // V0.9.1: offline analysis. The root must look like a system: a
+    // directory with Library or Users (a Time Machine "… - Data" folder,
+    // a mounted volume in target disk mode, a disk image).
+    let expanded = (root as NSString).expandingTildeInPath
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue else {
+        throw ValidationError("--root \(root): no such directory")
+    }
+    guard (try? FileManager.default.contentsOfDirectory(atPath: expanded)) != nil else {
+        throw ValidationError("--root \(root): not readable — Time Machine backups need Full Disk Access for "
+            + "your terminal (System Settings › Privacy & Security › Full Disk Access)")
+    }
+    guard ["Library", "Users"].contains(where: { FileManager.default.fileExists(atPath: expanded + "/" + $0) }) else {
+        throw ValidationError("--root \(root): no Library or Users folder — point at the system's root "
+            + "(for Time Machine the \"… - Data\" folder of a backup)")
+    }
+    return ScanCoordinator(environment: ScanEnvironment(offlineRoot: expanded)).perform(options: ScanOptions())
 }
 
 private func emitWarnings(_ report: ScanReport) {
@@ -71,6 +88,10 @@ struct ListCommand: ParsableCommand {
             help: ArgumentHelp("only this provenance: apple, homebrew, app-store, receipt, manual, unknown"))
     var origin: String?
     private var originFilter: ProvenanceKind?
+    @Option(name: .customLong("root"),
+            help: ArgumentHelp("offline analysis of another system below this folder (V0.9.1): a Time Machine "
+                + "backup's \"… - Data\" folder, a volume in target disk mode — files only, no live state"))
+    var root: String?
 
     mutating func run() throws {
         if let origin {
@@ -97,7 +118,7 @@ struct ListCommand: ParsableCommand {
             filter.category = parsed
         }
 
-        let report = runScan()
+        let report = try runScan(root: root)
         let rows = filter.apply(to: report.items)
         if json {
             print(try JSONRenderer.encode(rows))
@@ -127,13 +148,16 @@ struct SnapshotSaveCommand: ParsableCommand {
 
     @Option(name: .customLong("name"), help: "a name for the snapshot (letters, digits, - and _)")
     var name: String?
+    @Option(name: .customLong("root"), help: "snapshot another system offline (see `list --root`)")
+    var root: String?
     @Flag(name: .customLong("json"), help: "machine-readable result")
     var json = false
 
     mutating func run() throws {
-        let report = runScan()
+        let report = try runScan(root: root)
         let snapshot = InventorySnapshot(version: LaunchKeeper.configuration.version,
-                                         host: ProcessInfo.processInfo.hostName, name: name,
+                                         host: root.map { "offline:" + $0 } ?? ProcessInfo.processInfo.hostName,
+                                         name: name,
                                          incompleteLayers: report.incompleteLayers, items: report.items)
         let store = InventorySnapshotStore(home: NSHomeDirectory())
         let path = try store.save(snapshot)
@@ -214,7 +238,7 @@ struct DiffCommand: ParsableCommand {
             afterItems = try store.load(path: afterPath).items
             afterLabel = (afterPath as NSString).lastPathComponent
         } else {
-            let scan = runScan()
+            let scan = try runScan()
             report = scan
             afterItems = scan.items
             afterLabel = "now"
@@ -320,7 +344,7 @@ struct DoctorCommand: ParsableCommand {
     }
 
     mutating func run() throws {
-        let report = runScan()
+        let report = try runScan()
         if json {
             let orphans = report.items.filter { $0.orphaned }
             print(try JSONRenderer.encode(DoctorJSON(
@@ -364,7 +388,7 @@ struct BackgroundCommand: ParsableCommand {
     var json = false
 
     mutating func run() throws {
-        let report = runScan()
+        let report = try runScan()
         let view = BackgroundView.build(from: report)
         if json {
             print(try JSONRenderer.encode(view))
@@ -394,7 +418,7 @@ struct ReceiptsCommand: ParsableCommand {
     var missing = false
 
     mutating func run() throws {
-        let report = runScan()
+        let report = try runScan()
         var view = ReceiptsView.build(from: report, includeApple: all)
         if missing { view.rows = view.rows.filter { $0.missingFiles > 0 } }
         if json {
@@ -1168,7 +1192,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.9.0).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.9.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1179,7 +1203,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.9.0",
+        version: "0.9.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

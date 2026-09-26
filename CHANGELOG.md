@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.9.1] — 2026-09-26
+
+### Added
+- `list --root <folder>` and `snapshot save --root <folder>`: offline
+  analysis of another system from its files (Time Machine backup's
+  "… - Data" folder, target disk mode, disk image). `RootedFileManager`
+  maps every absolute path below the root (with `/private` fallbacks for
+  `/etc`, `/var`, `/tmp`); all homes under `<root>/Users` are scanned;
+  launch plists, helpers, StartupItems, loginwindow hooks, rc/emond,
+  plugin directories, shell profiles, paths.d and code signatures. Live
+  layers are listed as not available offline; `OfflineRunner` lets only
+  `codesign` (never signing) and `launchctl plist` run, with mapped paths.
+  Everything is display-only. Unreadable roots name Full Disk Access.
+
+### Changed
+- Shell startup and `/etc/crontab` are read through the injected file
+  manager (no more `String(contentsOfFile:)` past it).
+
+4 new tests (330 total).
+
 ## [0.9.0] — 2026-09-26
 
 ### Added

@@ -106,16 +106,20 @@ public struct ScanEnvironment {
     public var legacyScanner: LegacyScanner?
     /// V0.9: reuse / keep the BTM dump across scans of one process.
     public var btmCache: BTMDumpCache?
+    /// V0.9.1: inventory another system from its files (`--root`).
+    public var offlineRoot: String?
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
                 home: String = NSHomeDirectory(),
                 uid: Int = Int(getuid()),
                 legacyScanner: LegacyScanner? = nil,
-                btmCache: BTMDumpCache? = nil) {
+                btmCache: BTMDumpCache? = nil,
+                offlineRoot: String? = nil) {
         self.runner = runner; self.fileManager = fileManager
         self.home = home; self.uid = uid
         self.legacyScanner = legacyScanner
         self.btmCache = btmCache
+        self.offlineRoot = offlineRoot
     }
 }
 
@@ -126,6 +130,9 @@ public struct ScanCoordinator {
     }
 
     public func perform(options: ScanOptions = ScanOptions()) -> ScanReport {
+        if let root = environment.offlineRoot {
+            return performOffline(root: root, options: options)
+        }
         let env = environment
         var warnings: [String] = []
         var checks: [String] = []
@@ -417,5 +424,110 @@ public struct ScanCoordinator {
                           btmContainers: containers)
         report.receiptIndex = receiptIndex
         return report
+    }
+
+    /// V0.9.1 — offline analysis of another system below `root`. File-based
+    /// stages only, for every user home found there; everything that only
+    /// the running system can answer is named as not available, never
+    /// guessed (and never taken from THIS machine: the runner refuses).
+    func performOffline(root: String, options: ScanOptions) -> ScanReport {
+        let fm = RootedFileManager(root: root)
+        let runner = OfflineRunner(inner: environment.runner, fileManager: fm)
+        let homes = fm.homes()
+        var warnings: [String] = []
+        var checks = ["offline analysis of \(root) — \(homes.count) user home(s): "
+                      + (homes.isEmpty ? "none" : homes.joined(separator: ", "))]
+        for layer in ["launchctl print (live state)", "sfltool dumpbtm (Background Task Management)",
+                      "pluginkit (app extensions)", "systemextensionsctl/kmutil", "crontab/at/pmset",
+                      "lsof/socketfilterfw (network)", "pkgutil (receipts)", "Spotlight"] {
+            checks.append("\(layer): not available offline")
+        }
+
+        // Launch plists: system + every user.
+        var dirs = LaunchJobScanner.defaultDirectories(home: homes.first ?? "/var/empty")
+            .filter { $0.domain == .system }
+        if options.includeUser {
+            for home in homes {
+                dirs.append(LaunchJobScanner.Directory(path: home + "/Library/LaunchAgents", domain: .user,
+                                                       kind: .launchAgentUser))
+            }
+        }
+        let (jobs, plistWarnings) = LaunchJobScanner(directories: dirs, fileManager: fm).scan()
+        warnings.append(contentsOf: plistWarnings)
+        checks.append("plist sources: \(dirs.count) dirs, \(jobs.count) jobs read")
+
+        var helpers: [PrivilegedHelperRecord] = []
+        if options.scanHelpers {
+            let result = PrivilegedHelperScanner(runner: runner, fileManager: fm).scan()
+            helpers = result.helpers
+            checks.append(contentsOf: result.checks)
+            warnings.append(contentsOf: result.warnings)
+        }
+
+        var legacy = LegacyScanner.Result()
+        if options.scanLegacy {
+            let plists = [("/Library/Preferences/com.apple.loginwindow.plist", ItemDomain.system)]
+                + homes.map { ($0 + "/Library/Preferences/com.apple.loginwindow.plist", ItemDomain.user) }
+            legacy = LegacyScanner(fileManager: fm, home: homes.first ?? "/var/empty",
+                                   loginwindowPlists: plists.map { (path: $0.0, domain: $0.1) }).scan()
+            checks.append(contentsOf: legacy.checks)
+            warnings.append(contentsOf: legacy.warnings)
+        }
+
+        var plugins: [PluginBundleRecord] = []
+        if options.scanPlugins {
+            var directories = PluginDirectory.defaults(home: homes.first ?? "/var/empty")
+            for home in homes.dropFirst() {
+                directories += PluginDirectory.defaults(home: home).filter { $0.domain == .user }
+            }
+            let result = PluginDirectoryScanner(runner: runner, fileManager: fm, directories: directories).scan()
+            plugins = result.plugins
+            checks.append(contentsOf: result.checks.filter { !$0.hasPrefix("authorizationdb") })
+        }
+
+        var shell: [ShellStartupRecord] = []
+        if options.scanShell {
+            for (index, home) in homes.enumerated() {
+                // System files and paths.d once, with the first home.
+                let scanner = index == 0
+                    ? ShellStartupScanner(fileManager: fm, home: home)
+                    : ShellStartupScanner(fileManager: fm, home: home, systemFiles: [], pathsDirectories: [])
+                let result = scanner.scan()
+                shell += result.files
+                warnings.append(contentsOf: result.warnings)
+            }
+            checks.append("shell startup: \(shell.count) files across \(homes.count) home(s)")
+        }
+
+        let home = homes.first ?? "/var/empty"
+        let (items, _) = ItemCorrelator(fileManager: fm, home: home).correlate(ItemCorrelator.Input(
+            jobs: jobs, launchd: [], btm: [], disabled: [:], uid: -1, helpers: helpers, legacy: legacy,
+            plugins: plugins, shell: shell))
+        var analyzed = items
+        if options.scanSignatures {
+            let signatures = SignatureScanner()
+            for index in analyzed.indices {
+                let item = analyzed[index]
+                let bundle = [ItemType.plugin].contains(item.type) ? item.path : nil
+                guard let exec = item.executable ?? bundle, !exec.isEmpty else { continue }
+                let record = signatures.status(for: exec, runner: runner)
+                analyzed[index].codeSignatureStatus = record.status
+                if let team = record.teamIdentifier { analyzed[index].metadata["signature-team"] = team }
+            }
+        }
+        var appResolver = AppContextResolver(fileManager: fm, runner: runner)
+        appResolver.apply(to: &analyzed)
+        OrphanDetector(fileManager: fm).apply(to: &analyzed)
+        RiskAnalyzer(fileManager: fm).apply(to: &analyzed)
+        ProvenanceResolver(fileManager: fm, receipts: nil).apply(to: &analyzed)
+        // Nothing here can be switched: launchkeeper acts on the running
+        // system only.
+        for index in analyzed.indices {
+            analyzed[index].control = Controllability(level: .displayOnly, actions: [],
+                reason: "offline analysis of \(root) — launchkeeper controls only the running system")
+            analyzed[index].metadata["offline-root"] = root
+        }
+        checks.append("\(analyzed.count) items, \(analyzed.filter(\.orphaned).count) orphaned")
+        return ScanReport(items: analyzed, uncorrelated: [], warnings: warnings, checks: checks)
     }
 }

@@ -108,7 +108,9 @@ public struct ShellStartupScanner {
     }
 
     private func record(kind: String, path: String, domain: ItemDomain, sourcedBy: String? = nil) -> ShellStartupRecord? {
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        // Through the file manager, not String(contentsOfFile:) — an offline
+        // analysis (V0.9.1) maps paths into another root.
+        guard let text = fileManager.contents(atPath: path).flatMap({ String(data: $0, encoding: .utf8) }) else { return nil }
         let attrs = try? fileManager.attributesOfItem(atPath: path)
         let parsed = ShellFileParser.parse(text, home: home, baseDirectory: (path as NSString).deletingLastPathComponent)
         var modified: String?
@@ -155,7 +157,7 @@ public struct ShellStartupScanner {
             guard let names = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
             for name in names.sorted() where !name.hasPrefix(".") {
                 let path = dir + "/" + name
-                guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+                guard let text = fileManager.contents(atPath: path).flatMap({ String(data: $0, encoding: .utf8) }) else { continue }
                 let entries = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
                 // Runtime mounts (/var/run/…, Apple's cryptexes) come and go by design.

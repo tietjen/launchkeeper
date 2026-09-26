@@ -175,7 +175,7 @@ public struct ScheduledScanner {
         }
         // System table (absent on a stock macOS; present = worth a look).
         if fileManager.fileExists(atPath: systemCrontab),
-           let text = try? String(contentsOfFile: systemCrontab, encoding: .utf8) {
+           let text = fileManager.contents(atPath: systemCrontab).flatMap({ String(data: $0, encoding: .utf8) }) {
             let entries = CronParser.parse(text, user: "root", source: systemCrontab, systemTable: true)
             result.cron.append(contentsOf: entries)
             result.checks.append("\(systemCrontab): \(entries.count) entries")
