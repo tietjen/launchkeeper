@@ -237,6 +237,13 @@ public enum TargetResolver {
     /// a BTM key, and the undo hints address them by identifier).
     public static func resolve(_ needle: String, in items: [BackgroundItem]) -> TargetResolution {
         let trimmed = needle.trimmingCharacters(in: .whitespaces)
+        // An exact stable key wins outright (V0.9.5): keys are unique per
+        // scan, and the app addresses entries only this way. Without it,
+        // "com.vendor.agent" also matched "com.vendor.agent.helper" as a
+        // fragment and the request was refused as ambiguous.
+        if !trimmed.isEmpty, let exact = items.first(where: { $0.key == trimmed }) {
+            return .unique(exact)
+        }
         let lower = trimmed.lowercased()
         var candidates: [BackgroundItem] = []
         if !lower.isEmpty, lower.allSatisfy({ $0.isNumber }), let n = Int(lower) {

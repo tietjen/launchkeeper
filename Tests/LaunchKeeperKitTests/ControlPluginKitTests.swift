@@ -158,6 +158,20 @@ final class PluginKitControlPlanTests: XCTestCase {
         XCTAssertTrue(hint.hasPrefix("pluginkit -e default -i com.example.c"), hint)
     }
 
+    /// V0.9.5: the app addresses entries by stable key; a key that is also a
+    /// fragment of another entry must not make the request ambiguous.
+    func testExactKeyWinsOverFragmentMatches() {
+        let agent = BackgroundItem(key: "com.vendor.agent", displayName: "agent", label: "com.vendor.agent")
+        let helper = BackgroundItem(key: "com.vendor.agent.helper", displayName: "helper", label: "com.vendor.agent.helper")
+        guard case .unique(let found) = TargetResolver.resolve("com.vendor.agent", in: [agent, helper]) else {
+            return XCTFail("exact key must resolve uniquely")
+        }
+        XCTAssertEqual(found.key, "com.vendor.agent")
+        guard case .ambiguous = TargetResolver.resolve("com.vendor", in: [agent, helper]) else {
+            return XCTFail("a real fragment stays ambiguous")
+        }
+    }
+
     func testResolverFindsAMergedExtensionByIdentifier() {
         var merged = extensionItem(identifier: "com.example.app.QL")
         merged.key = "btm:ABCD"

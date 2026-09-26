@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.9.5] — 2026-09-26
+
+### Changed
+- An exact entry key resolves uniquely before any fragment match
+  (`disable com.vendor.agent` no longer collides with
+  `com.vendor.agent.helper`). The app addresses entries only by key.
+- `RemediationEnvironment.btmCache` passes a Background Task Management dump
+  cache to the resolution scan, so a caller that already holds a dump (the
+  app) does not pay a cold one per action.
+- `quarantine restore` moves paths in the user's own home back without sudo
+  when the user may move them (app leftovers); everything else still goes
+  through the sudo seam.
+
+1 new test (339 total).
+
 ## [0.9.4] — 2026-09-26
 
 ### Added

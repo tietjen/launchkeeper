@@ -494,14 +494,22 @@ public struct CleanupEngine {
                 continue
             }
             let parent = (move.original as NSString).deletingLastPathComponent
+            // V0.9.5: a path in the user's own home whose quarantined copy the
+            // user may move goes back without sudo (app leftovers) — the app
+            // cannot answer a password prompt, and root is not needed there.
+            let asUser = move.original.hasPrefix(environment.home + "/")
+                && fm.isWritableFile(atPath: (move.quarantined as NSString).deletingLastPathComponent)
+                && (!environment.disk.exists(parent) || fm.isWritableFile(atPath: environment.disk.disk(parent)))
             if !environment.disk.exists(parent) {
-                plan.append(PlannedCommand(command: "/usr/bin/sudo",
-                                           arguments: ["/bin/mkdir", "-p", "--", environment.disk.disk(parent)],
-                                           description: "recreate \(parent)"))
+                let mkdir = ["/bin/mkdir", "-p", "--", environment.disk.disk(parent)]
+                plan.append(asUser
+                    ? PlannedCommand(command: mkdir[0], arguments: Array(mkdir.dropFirst()), description: "recreate \(parent)")
+                    : PlannedCommand(command: "/usr/bin/sudo", arguments: mkdir, description: "recreate \(parent)"))
             }
-            plan.append(PlannedCommand(command: "/usr/bin/sudo",
-                                       arguments: ["/bin/mv", "--", move.quarantined, environment.disk.disk(move.original)],
-                                       description: "move back to \(move.original)"))
+            let mv = ["/bin/mv", "--", move.quarantined, environment.disk.disk(move.original)]
+            plan.append(asUser
+                ? PlannedCommand(command: mv[0], arguments: Array(mv.dropFirst()), description: "move back to \(move.original)")
+                : PlannedCommand(command: "/usr/bin/sudo", arguments: mv, description: "move back to \(move.original)"))
             restoring.append(move)
         }
         var receiptBack = false

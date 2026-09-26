@@ -20,6 +20,10 @@ public struct RemediationEnvironment {
     public var configSnapshotsRoot: String
     /// Passed through to the resolution scan (tests: temp loginwindow plists).
     public var legacyScanner: LegacyScanner?
+    /// V0.9.5: the caller's Background Task Management dump cache, reused by
+    /// the resolution scan — the app would otherwise pay a cold dump (minutes)
+    /// for every action.
+    public var btmCache: BTMDumpCache?
     /// V0.8.1: where `remove` moves leftover files, and the disk it sees.
     public var quarantineRoot: String
     public var disk: DiskView
@@ -33,7 +37,7 @@ public struct RemediationEnvironment {
                 backupsRoot: String? = nil,
                 configSnapshotsRoot: String? = nil,
                 legacyScanner: LegacyScanner? = nil,
-                quarantineRoot: String? = nil, disk: DiskView? = nil) {
+                quarantineRoot: String? = nil, disk: DiskView? = nil, btmCache: BTMDumpCache? = nil) {
         let defaults = BackupEnvironment(fileManager: fileManager, home: home)
         self.runner = runner
         self.fileManager = fileManager
@@ -46,6 +50,7 @@ public struct RemediationEnvironment {
         self.legacyScanner = legacyScanner
         self.quarantineRoot = quarantineRoot ?? LaunchKeeperPaths.quarantine(home: home)
         self.disk = disk ?? DiskView(fileManager: fileManager)
+        self.btmCache = btmCache
     }
 }
 
@@ -318,7 +323,8 @@ public struct RemediationEngine {
         let scanEnv = ScanEnvironment(runner: environment.runner,
                                       fileManager: environment.fileManager,
                                       home: environment.home, uid: environment.uid,
-                                      legacyScanner: environment.legacyScanner)
+                                      legacyScanner: environment.legacyScanner,
+                                      btmCache: environment.btmCache)
         let report = ScanCoordinator(environment: scanEnv).perform(options: scanOptions)
 
         func finish(_ status: RemediationStatus, target: String, messages: [String],

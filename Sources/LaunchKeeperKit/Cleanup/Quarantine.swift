@@ -52,7 +52,7 @@ public struct QuarantineStore {
         self.fileManager = fileManager
     }
 
-    public static let toolVersion = "0.9.4"
+    public static let toolVersion = "0.9.5"
 
     /// A name is one path component of our own making — never a path.
     public static func isValidName(_ name: String) -> Bool {

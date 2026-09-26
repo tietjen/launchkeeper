@@ -108,6 +108,10 @@ final class CleanupAppLeftoverTests: XCTestCase {
         let name = try XCTUnwrap(moved.quarantine)
         let back = engine(fake).restore(name: name, apply: true)
         XCTAssertEqual(back.status, .appliedOk, "\(back.messages)")
+        // V0.9.5: home paths go back as the user, /Library via sudo.
+        let sudoTargets = back.plan.filter { $0.command == "/usr/bin/sudo" }.flatMap(\.arguments)
+        XCTAssertTrue(sudoTargets.contains { $0.hasSuffix("/Library/Preferences/org.vim.MacVim.plist") })
+        XCTAssertFalse(sudoTargets.contains { $0.contains(home + "/Library/Caches") }, "\(back.plan.map(\.display))")
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: root + home + "/Library/Saved Application State/org.vim.MacVim.savedState/data.data"))
     }
