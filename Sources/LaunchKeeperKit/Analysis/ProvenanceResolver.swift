@@ -39,8 +39,8 @@ public struct ProvenanceResolver {
     public func resolve(_ item: BackgroundItem) -> Provenance {
         if item.label?.hasPrefix("com.apple.") == true
             || item.displayName.hasPrefix("com.apple.")
-            || item.executable.map(PathUtils.isSystemOwnedPath) == true
-            || item.path?.hasPrefix("/System/") == true {
+            || item.path?.hasPrefix("/System/") == true
+            || (runsApplePlatformBinary(item) && !hasThirdPartySource(item)) {
             return Provenance(kind: .apple, detail: "Apple system component")
         }
         if item.label?.hasPrefix("homebrew.") == true {
@@ -79,6 +79,27 @@ public struct ProvenanceResolver {
                                   detail: "app bundle without a package receipt or App Store receipt: " + bundle)
             }
         }
+        // V0.10.1: a third-party plist that starts one of macOS's own programs
+        // (/bin/bash, osascript, curl …) is NOT Apple's — the classic way
+        // persistence hides. Say what it runs instead of vouching for it.
+        if runsApplePlatformBinary(item), let executable = item.executable {
+            return Provenance(kind: .unknown, detail: "third-party entry running a macOS program: " + executable)
+        }
         return Provenance(kind: .unknown, detail: nil)
+    }
+
+    /// The executable is one of Apple's platform binaries (/System, /usr but
+    /// not /usr/local, /bin, /sbin).
+    func runsApplePlatformBinary(_ item: BackgroundItem) -> Bool {
+        item.executable.map(PathUtils.isApplePlatformPath) == true
+    }
+
+    /// Whether the entry comes from a file someone other than macOS wrote:
+    /// a backing plist/config outside Apple's territory. Before V0.10.1 an
+    /// Apple executable alone made an entry "Apple" — a user LaunchAgent
+    /// running /usr/bin/true (or /bin/bash -c …) was vouched for.
+    func hasThirdPartySource(_ item: BackgroundItem) -> Bool {
+        guard let path = item.path, path.hasPrefix("/"), path != item.executable else { return false }
+        return !PathUtils.isApplePlatformPath(path)
     }
 }

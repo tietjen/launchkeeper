@@ -24,6 +24,20 @@ public struct RiskAnalyzer {
                 flags.append("shell-interpreter-service")
             }
 
+            // V0.10.1: a third-party launch plist whose program is one of
+            // macOS's own binaries — Apple's signature vouches for the binary,
+            // not for what the plist makes it do. Interpreters have their own
+            // flag (and their script is shown); a launcher (arch, env, nohup …)
+            // whose real target is a third-party program is fine — that
+            // target is shown and judged on its own (live: Brother's agents).
+            let runsTarget = item.metadata["runs-target"].flatMap { $0.hasPrefix("/") ? $0 : nil }
+            if let exec = item.executable, PathUtils.isApplePlatformPath(exec), !interpreterLike(exec),
+               item.plistPresent, !(item.label ?? "").hasPrefix("com.apple."),
+               let path = item.path, !PathUtils.isApplePlatformPath(path),
+               runsTarget.map(PathUtils.isApplePlatformPath) ?? true {
+                flags.append("third-party-plist-runs-system-binary")
+            }
+
             // Unsigned or ad-hoc payloads. Apple system components are excluded:
             // they are read-only by design and not user-manageable anyway.
             if let sig = item.codeSignatureStatus, sig == "unsigned" || sig == "adhoc",

@@ -153,6 +153,41 @@ final class ProvenanceResolverTests: XCTestCase {
         XCTAssertEqual(resolver.resolve(item).kind, .appStore)
     }
 
+    func testThirdPartyPlistRunningAMacOSProgramIsNotApple() {
+        // V0.10.1: live, a user LaunchAgent running /usr/bin/true showed as
+        // "Apple system component" — /bin/bash -c … would have, too.
+        let item = BackgroundItem(key: "k", displayName: "k", path: "/Users/t/Library/LaunchAgents/de.x.probe.plist",
+                                  label: "de.x.probe", executable: "/usr/bin/true")
+        let provenance = resolver.resolve(item)
+        XCTAssertEqual(provenance.kind, .unknown)
+        XCTAssertEqual(provenance.detail, "third-party entry running a macOS program: /usr/bin/true")
+        // Apple's own entries stay Apple: by label, by /System, or an Apple binary without a third-party file.
+        XCTAssertEqual(resolver.resolve(BackgroundItem(key: "k", displayName: "k",
+                                                       path: "/System/Library/LaunchDaemons/x.plist",
+                                                       label: "x", executable: "/usr/libexec/x")).kind, .apple)
+        XCTAssertEqual(resolver.resolve(BackgroundItem(key: "k", displayName: "k", executable: "/usr/libexec/x")).kind, .apple)
+        // /usr/local is not Apple's.
+        XCTAssertEqual(resolver.resolve(BackgroundItem(key: "k", displayName: "k", label: "com.example.t",
+                                                       executable: "/usr/local/bin/tool")).kind, .unknown)
+    }
+
+    func testThirdPartyPlistRunningASystemBinaryIsFlagged() {
+        var item = BackgroundItem(key: "k", displayName: "k", path: "/Users/t/Library/LaunchAgents/de.x.probe.plist",
+                                  label: "de.x.probe", executable: "/usr/bin/curl")
+        item.plistPresent = true
+        var items = [item]
+        RiskAnalyzer().apply(to: &items)
+        XCTAssertEqual(items[0].riskFlags, ["third-party-plist-runs-system-binary"])
+
+        // A launcher whose real target is a third-party program is judged by that target.
+        var launcher = item
+        launcher.executable = "/usr/bin/arch"
+        launcher.metadata["runs-target"] = "/Library/Printers/Vendor/Server.app/Contents/MacOS/Server"
+        var launched = [launcher]
+        RiskAnalyzer().apply(to: &launched)
+        XCTAssertEqual(launched[0].riskFlags, [])
+    }
+
     func testUnknownStaysUnknown() {
         XCTAssertEqual(resolver.resolve(BackgroundItem(key: "k", displayName: "k", label: "com.example.t",
                                                        executable: "/Applications/T.app/Contents/MacOS/t")).kind, .unknown)

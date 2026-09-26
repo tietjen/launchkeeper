@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.10.1] — 2026-09-26
+
+### Fixed
+- Origin "apple" is no longer given for an Apple executable alone. A
+  third-party plist that starts one of macOS's own programs (`/bin/bash`,
+  `osascript`, `curl`, `/usr/bin/true` …) was shown as "Apple system
+  component" — the classic way persistence hides. Apple now means: an Apple
+  label, a file under /System, or an Apple binary without a third-party
+  backing file. Such entries read "unknown — third-party entry running a
+  macOS program". `/usr/local` is no longer taken for Apple's either
+  (Homebrew/vendor tools there were "apple"). Live: 7 entries on the dev Mac
+  changed origin.
+
+### Added
+- Risk hint `third-party-plist-runs-system-binary` for such entries, unless
+  a launcher (`arch`, `env` …) starts a third-party program that is judged on
+  its own.
+
+2 new tests (345 total).
+
 ## [0.10.0] — 2026-09-26
 
 ### Added
