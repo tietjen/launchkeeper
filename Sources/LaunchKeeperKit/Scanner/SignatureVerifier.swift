@@ -8,7 +8,7 @@ import CryptoKit
 // path), exactly right when one entry deserves a look: is the seal
 // intact, who signed it, is it notarized, what is its hash.
 
-public struct SignatureVerification: Codable, Equatable {
+public struct SignatureVerification: Codable, Equatable, Sendable {
     public var path: String
     /// `codesign --verify --strict`: seal and designated requirement hold.
     public var sealValid: Bool

@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.10.2] — 2026-09-26
+
+### Fixed
+- `SignatureVerification` is `Sendable` (value type of strings and flags).
+  Swift 6.1 (Xcode 16.4, the GitHub macOS runners) refused to hand it out of
+  a background task in the app; Swift 6.3 had accepted it.
+
 ## [0.10.1] — 2026-09-26
 
 ### Fixed
