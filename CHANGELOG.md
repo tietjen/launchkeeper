@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.9.2] — 2026-09-26
+
+### Added
+- `LaunchKeeperKit` is a library product now, so other packages can depend
+  on it — the SwiftUI app (`launchkeeper-app`) builds on the same core.
+
 ## [0.9.1] — 2026-09-26
 
 ### Added
