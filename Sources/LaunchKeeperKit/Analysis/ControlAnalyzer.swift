@@ -24,11 +24,21 @@ public struct ControlAnalyzer {
         // what launchkeeper can do is show them and say where the switch is.
         switch item.type {
         case .systemExtension:
-            let target = [item.teamIdentifier, item.bundleIdentifier].compactMap { $0 }.joined(separator: " ")
+            // `systemextensionsctl uninstall` refuses while SIP is on (live
+            // 2026-09-26) — never offer it as the way. macOS removes a
+            // system extension itself when its host app goes to the Trash
+            // in the Finder, or through the vendor's uninstaller.
             let pane = item.metadata["sysext-pane"] ?? "Extensions"
+            let waiting = (item.metadata["sysext-state"] ?? "").contains("waiting for user")
+                ? " It was never approved (waiting for user), so it is not active." : ""
+            let way = item.metadata["sysext-host-app"] == "not found"
+                ? "its host app is gone — reinstall the app, then move it to the Trash in the Finder (or run the "
+                    + "vendor's uninstaller); macOS removes the extension with it"
+                : "move its host app to the Trash in the Finder (or run the vendor's uninstaller); macOS removes "
+                    + "the extension with it"
             return Controllability(level: .displayOnly, actions: [],
-                reason: "system extension — deactivate via its host app or `systemextensionsctl uninstall "
-                    + "\(target)` (SIP rules apply); System Settings › General › Login Items & Extensions › \(pane)")
+                reason: "system extension — \(way). `systemextensionsctl uninstall` only works with SIP "
+                    + "disabled. Switch: System Settings › General › Login Items & Extensions › \(pane).\(waiting)")
         case .kernelExtension:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "kernel extension — unload/remove via the vendor's uninstaller; on Apple silicon "

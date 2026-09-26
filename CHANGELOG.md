@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [Unreleased]
+
+### Fixed
+- The control hint for system extensions no longer offers
+  `systemextensionsctl uninstall` as the way out — it refuses while System
+  Integrity Protection is on (found live). The hint now names the Finder
+  route (host app to the Trash, or the vendor's uninstaller; reinstall the
+  app first when it is gone) and says when an extension waiting for user
+  approval was never active.
+
 ## [0.8.2] — 2026-09-26
 
 ### Added

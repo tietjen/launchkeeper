@@ -660,8 +660,12 @@ expected type (a helper is a file, a StartupItem a folder), and an entry an
 Apple receipt lists is refused. If a third-party receipt lists it, the plan
 says so — `uninstall <package>` would take the rest of that package too.
 Shell profiles (`.zshrc` …) stay untouched: launchkeeper never edits shell
-files. System extensions without their app are not files launchkeeper
-takes: `systemextensionsctl uninstall <team> <bundle-id>` (SIP rules apply).
+files. System extensions are not files launchkeeper takes: macOS removes
+one itself when its host app goes to the Trash **in the Finder** (or through
+the vendor's uninstaller) — if the app is already gone, reinstall it first.
+`systemextensionsctl uninstall` refuses while System Integrity Protection is
+on, and switching SIP off for that is not worth it. An extension stuck at
+`[activated waiting for user]` was never approved and is not active.
 
 ### App leftovers (V0.8.2)
 

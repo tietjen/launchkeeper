@@ -235,14 +235,19 @@ final class SystemExtensionCorrelationTests: XCTestCase {
         XCTAssertEqual(filter.parentApplication, "Example")
         XCTAssertTrue(filter.running && filter.enabled)
         XCTAssertEqual(filter.control?.level, .displayOnly)
-        XCTAssertTrue(filter.control?.reason.contains("systemextensionsctl uninstall ABCDE12345 com.example.filter") == true,
+        // The Finder route, not systemextensionsctl (refuses with SIP on).
+        XCTAssertTrue(filter.control?.reason.contains("move its host app to the Trash in the Finder") == true,
                       filter.control?.reason ?? "-")
+        XCTAssertTrue(filter.control?.reason.contains("only works with SIP disabled") == true)
         XCTAssertTrue(filter.control?.reason.contains("Network Extensions") == true)
         XCTAssertFalse(filter.orphaned)
         let lost = try XCTUnwrap(items.first { $0.key == "sysext:com.example.gone.es" })
         XCTAssertTrue(lost.orphaned)
         XCTAssertTrue(lost.orphanReasons.contains { $0.contains("host app not found") }, "\(lost.orphanReasons)")
         XCTAssertEqual(lost.orphanConfidence, .medium)
+        XCTAssertTrue(lost.control?.reason.contains("reinstall the app, then move it to the Trash") == true,
+                      lost.control?.reason ?? "-")
+        XCTAssertTrue(lost.control?.reason.contains("never approved") == true, "waiting for user = not active")
         let driver = try XCTUnwrap(items.first { $0.key == "kext:com.example.driver" })
         XCTAssertEqual(driver.type, .kernelExtension)
         XCTAssertFalse(driver.loaded)
