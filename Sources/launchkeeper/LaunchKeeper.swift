@@ -629,6 +629,9 @@ private func performRemediation(operation: RemediationOperation, target: String,
                 print("  \(index + 1). \(command.display)")
                 print("      \(command.description)")
             }
+            for line in result.messages where !line.hasPrefix("dry-run: nothing executed") {
+                print("  \(line)")
+            }
             if let undo = result.undoHint {
                 print("\nundo later with: \(undo)")
             }
@@ -810,13 +813,15 @@ struct RemoveCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "remove",
         abstract: """
-        Delete one ORPHANED launch .plist (gated).
+        Take away one ORPHANED entry (gated).
 
-        Refused unless all locks pass: orphaned only, a .plist inside the
-        launch directories, no symlink escape, no Apple or /System target.
-        --apply writes a launch-dir backup first — without a restorable
-        snapshot nothing is deleted. A working component must be disabled
-        instead (reversible).
+        An orphaned launch .plist is deleted — refused unless all locks pass
+        (a .plist inside the launch directories, no symlink escape, no Apple
+        or /System target), and --apply writes a launch-dir backup first.
+        Since V0.8.1 provable leftovers — a privileged helper no job starts,
+        a StartupItem, a paths.d file whose every entry is gone — are MOVED
+        into the quarantine instead (`launchkeeper quarantine restore`).
+        A working component must be disabled instead (reversible).
         """)
 
     @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
@@ -937,7 +942,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.0).
+        Background-service inventory + app correlation + gated remediation + cleanup (V0.8.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -948,7 +953,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.8.0",
+        version: "0.8.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

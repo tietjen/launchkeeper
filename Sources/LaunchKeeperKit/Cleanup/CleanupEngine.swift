@@ -285,6 +285,89 @@ public struct CleanupEngine {
         return plan
     }
 
+    // MARK: - leftover items (V0.8.1)
+
+    /// `remove` for a provable leftover file (gate already passed): re-check
+    /// it on disk, ask every receipt whether Apple claims it, then move it
+    /// into the quarantine — one `sudo mkdir -p` + one `sudo mv`.
+    public func quarantineItem(_ item: BackgroundItem, apply: Bool) -> CleanupResult {
+        func result(_ status: RemediationStatus, _ messages: [String], plan: [PlannedCommand] = [],
+                    executed: [String] = [], quarantine: String? = nil, undo: String? = nil) -> CleanupResult {
+            CleanupResult(operation: "remove", target: "file:" + (item.path ?? item.key), status: status,
+                          messages: messages, plan: plan, executed: executed, analysis: nil,
+                          quarantine: quarantine, undoHint: undo)
+        }
+        guard let path = item.path else { return result(.refused("no path"), ["refused: no path to move"]) }
+        let disk = environment.disk
+        let expected: FileAttributeType = item.type == .startupItem ? .typeDirectory : .typeRegular
+        guard let type = disk.type(path) else {
+            return result(.refused("not on disk anymore"), ["refused: \(path) is not on disk anymore"])
+        }
+        guard type == expected else {
+            return result(.refused("unexpected file type"),
+                          ["refused: \(path) is a \(type.rawValue), expected \(expected.rawValue) — never followed"])
+        }
+        let claims = ClaimCache(runner: environment.runner).claimants(path)
+        if let apple = claims.first(where: { $0.hasPrefix("com.apple.") }) {
+            return result(.refused("claimed by Apple (\(apple))"), ["refused: an Apple receipt lists \(path)"])
+        }
+        var messages: [String] = []
+        if let owner = claims.sorted().first {
+            messages.append("note: receipt \(owner) lists this file — `launchkeeper uninstall \(owner)` "
+                + "would take the rest of that package as well")
+        }
+        // paths.d: every entry must still be gone NOW, not only at scan time.
+        if item.type == .pathEntry {
+            let text = (disk.fileManager.contents(atPath: disk.disk(path))).map { String(decoding: $0, as: UTF8.self) } ?? ""
+            let entries = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            let alive = entries.filter { disk.exists($0) }
+            guard !entries.isEmpty, alive.isEmpty else {
+                return result(.refused("a PATH entry exists"),
+                              ["refused: \(alive.first ?? "an entry") exists — only a file whose every entry is gone is a leftover"])
+            }
+        }
+
+        let name = store.makeName(kind: "remove", subject: (path as NSString).lastPathComponent)
+        let parent = (path as NSString).deletingLastPathComponent
+        let destination = store.quarantinedPath(name, original: parent)
+        let plan = [
+            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mkdir", "-p", "--", destination],
+                           description: "quarantine directory for \(parent)"),
+            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mv", "--", disk.disk(path), destination + "/"],
+                           description: "move the leftover into the quarantine (restorable)"),
+        ]
+        guard apply else {
+            return result(.planned, messages + ["dry-run: nothing moved (add --apply)"], plan: plan,
+                          undo: "launchkeeper quarantine restore <the new quarantine entry>")
+        }
+        var manifest = QuarantineManifest(
+            name: name, kind: "remove", createdAt: ISO8601DateFormatter().string(from: Date()),
+            toolVersion: QuarantineStore.toolVersion, packageIdentifier: nil, version: nil,
+            moves: [QuarantineMove(original: path, quarantined: store.quarantinedPath(name, original: path),
+                                   kind: item.type.rawValue)],
+            receiptCopies: [], forgot: false, status: "planned", notes: [item.key] + item.orphanReasons)
+        if let failure = store.write(manifest) {
+            return result(.refused(failure.reason), ["refused: \(failure.reason) — nothing moved"])
+        }
+        audit.append(operation: "quarantine", target: name, status: "created")
+        let (executed, failure) = run(plan, timeout: environment.interactiveTimeout)
+        var problems = failure.map { [$0] } ?? []
+        if disk.exists(path) { problems.append("still in place: \(path)") }
+        if (try? disk.fileManager.attributesOfItem(atPath: manifest.moves[0].quarantined)) == nil {
+            problems.append("not in the quarantine: \(manifest.moves[0].quarantined)")
+        }
+        let undo = "launchkeeper quarantine restore \(name)"
+        manifest.status = problems.isEmpty ? "applied-ok" : "applied-fail(\(problems.count))"
+        _ = store.write(manifest)
+        guard problems.isEmpty else {
+            return result(.appliedFailed(problems[0]), messages + problems, plan: plan, executed: executed,
+                          quarantine: name, undo: undo)
+        }
+        return result(.appliedOk, messages + ["verified: \(path) is in the quarantine (\(name))"], plan: plan,
+                      executed: executed, quarantine: name, undo: undo)
+    }
+
     // MARK: - restore
 
     public func restore(name: String, apply: Bool) -> CleanupResult {

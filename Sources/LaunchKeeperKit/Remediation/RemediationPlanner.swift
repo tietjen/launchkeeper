@@ -44,6 +44,8 @@ public enum RemediationPlanner {
             return "loginwindow:\(item.domain == .system ? "system" : "user"):\(item.metadata["hook-kind"] ?? "hook")"
         case .firewall:
             return "firewall:" + (item.metadata["firewall-path"] ?? item.key)
+        case .quarantine:
+            return "file:" + (item.path ?? item.key)
         case .launchd, nil:
             break
         }
@@ -89,7 +91,7 @@ public enum RemediationPlanner {
             return planPluginKit(operation: operation, item: item)
         case .firewall:
             return planFirewall(operation: operation, item: item)
-        case .cron, .loginHook:
+        case .cron, .loginHook, .quarantine:
             return []   // built by the engine from the source as it reads now
         case .launchd, nil:
             break

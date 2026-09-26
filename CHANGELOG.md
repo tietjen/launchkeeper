@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.8.1] — 2026-09-26
+
+### Added
+- `remove` takes provable leftover files into the quarantine (control
+  mechanism `quarantine`): privileged helpers no LaunchDaemon starts,
+  StartupItems, and `/etc/paths.d` / `/etc/manpaths.d` files whose every
+  entry points at a missing directory (re-read at run time). Only direct
+  entries of those locations, never Apple platform paths, refused when an
+  Apple receipt lists the file, the expected on-disk type is checked (no
+  following). `quarantine restore` brings them back.
+- The `remove` dry-run prints the plan's notes (e.g. which receipt lists
+  the file).
+
+### Changed
+- Control matrix: those leftovers are `removable` now (were display-only
+  "comes with V0.8").
+
+5 new tests (312 total).
+
 ## [0.8.0] — 2026-09-26
 
 ### Added

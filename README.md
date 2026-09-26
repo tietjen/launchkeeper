@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.0)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.8.1)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -249,6 +249,8 @@ launchkeeper uninstall <package-id> --apply          # move into the quarantine 
 launchkeeper quarantine [list]                       # what cleanup took away
 launchkeeper quarantine restore <name> [--apply]     # move it all back (never overwrites)
 launchkeeper quarantine purge <name> [--apply]       # delete one entry for good — the only real deletion
+launchkeeper remove <leftover>                       # V0.8.1: helper without a job, StartupItem,
+                                                     # dead paths.d file → into the quarantine
 
 # V0.3 — deletion, deliberately narrow
 launchkeeper remove <id|name>        # plan: backup snapshot, unload, delete ONE
@@ -638,6 +640,27 @@ bundle from `/Applications` unless your terminal has *App Management* (or
 Full Disk Access) permission — the verification then reports what did not
 move.
 
+### Leftover entries (V0.8.1)
+
+`remove` takes more than orphaned launch plists now. Three kinds of
+provable leftovers are **moved into the same quarantine** (never deleted),
+one entry per call, dry-run first:
+
+| leftover | where | proof |
+|---|---|---|
+| privileged helper | direct entry of `/Library/PrivilegedHelperTools` | no LaunchDaemon starts it (no job, no plist) |
+| StartupItem | direct folder of `/Library/StartupItems` | nothing runs StartupItems since OS X 10.10 |
+| PATH / MANPATH file | direct entry of `/etc/paths.d` or `/etc/manpaths.d` | *every* line points at a missing directory — re-read at run time |
+
+The gate allows only direct entries of these locations, never `/System` or
+Apple platform paths; at run time the entry must still be on disk with the
+expected type (a helper is a file, a StartupItem a folder), and an entry an
+Apple receipt lists is refused. If a third-party receipt lists it, the plan
+says so — `uninstall <package>` would take the rest of that package too.
+Shell profiles (`.zshrc` …) stay untouched: launchkeeper never edits shell
+files. System extensions without their app are not files launchkeeper
+takes: `systemextensionsctl uninstall <team> <bundle-id>` (SIP rules apply).
+
 ## How it works
 
     LaunchAgent/Daemon plists ─┐
@@ -742,6 +765,9 @@ orphans).
 
 ## Roadmap
 
+- **V0.8.1** ✅ — `remove` quarantines provable leftovers: privileged
+  helpers without a job, StartupItems, paths.d/manpaths.d files whose every
+  entry is gone (control mechanism `quarantine`, `removable` in the matrix)
 - **V0.8.0** ✅ — `uninstall <package-id>` by bill of materials (size +
   checksum, root-only files proven via sudo, claims of every receipt
   including Apple's, bundles all or nothing), moved into a quarantine with

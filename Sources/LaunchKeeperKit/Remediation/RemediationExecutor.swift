@@ -20,6 +20,9 @@ public struct RemediationEnvironment {
     public var configSnapshotsRoot: String
     /// Passed through to the resolution scan (tests: temp loginwindow plists).
     public var legacyScanner: LegacyScanner?
+    /// V0.8.1: where `remove` moves leftover files, and the disk it sees.
+    public var quarantineRoot: String
+    public var disk: DiskView
 
     public init(runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default,
@@ -29,7 +32,8 @@ public struct RemediationEnvironment {
                 systemDirPrefixes: [String]? = nil,
                 backupsRoot: String? = nil,
                 configSnapshotsRoot: String? = nil,
-                legacyScanner: LegacyScanner? = nil) {
+                legacyScanner: LegacyScanner? = nil,
+                quarantineRoot: String? = nil, disk: DiskView? = nil) {
         let defaults = BackupEnvironment(fileManager: fileManager, home: home)
         self.runner = runner
         self.fileManager = fileManager
@@ -40,6 +44,8 @@ public struct RemediationEnvironment {
         self.backupsRoot = backupsRoot ?? defaults.backupsRoot
         self.configSnapshotsRoot = configSnapshotsRoot ?? LaunchKeeperPaths.configSnapshots(home: home)
         self.legacyScanner = legacyScanner
+        self.quarantineRoot = quarantineRoot ?? LaunchKeeperPaths.quarantine(home: home)
+        self.disk = disk ?? DiskView(fileManager: fileManager)
     }
 }
 
@@ -161,6 +167,8 @@ public struct RemediationExecutor {
             return verifyLoginHook(operation: operation, item: item, script: expectation)
         case .firewall:
             return verifyFirewall(operation: operation, item: item)
+        case .quarantine:
+            return "quarantine moves are run and verified by the cleanup engine"
         case .launchd, nil:
             break
         }
@@ -358,6 +366,17 @@ public struct RemediationEngine {
                               undo: undo)
             case .allowed:
                 var messages: [String] = []
+
+                // Leftover files (V0.8.1): moved into the quarantine by the
+                // cleanup engine — the same store `uninstall` uses.
+                if item.controlMechanism == .quarantine {
+                    let cleanup = CleanupEngine(environment: CleanupEnvironment(
+                        runner: environment.runner, disk: environment.disk, home: environment.home,
+                        quarantineRoot: environment.quarantineRoot), audit: audit)
+                    let moved = cleanup.quarantineItem(item, apply: apply)
+                    return finish(moved.status, target: target, messages: moved.messages, plan: moved.plan,
+                                  executed: moved.executed, undo: moved.undoHint)
+                }
 
                 // Config-file switches (V0.7): the plan depends on the source
                 // as it reads NOW, and --apply snapshots it before the write.

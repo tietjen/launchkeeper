@@ -34,9 +34,7 @@ public struct ControlAnalyzer {
                 reason: "kernel extension — unload/remove via the vendor's uninstaller; on Apple silicon "
                     + "third-party kexts need Reduced Security")
         case .privilegedHelper where !item.launchdPresent && !item.plistPresent:
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "privileged helper without a launchd job — nothing to disable; deleting helper "
-                    + "binaries comes with V0.8 cleanup")
+            return quarantineControl(item)
         // V0.5.6 scheduled / legacy / plugin directories: read-only for now.
         case .cronJob:
             switch RemediationGate.evaluate(operation: .disable, item: item) {
@@ -68,8 +66,7 @@ public struct ControlAnalyzer {
                     mechanism: .loginHook)
             }
         case .startupItem:
-            return Controllability(level: .displayOnly, actions: [],
-                reason: "legacy StartupItem — nothing runs it since OS X 10.10; removal over the gate comes with V0.8")
+            return quarantineControl(item)
         case .rcScript, .emondRule:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "legacy persistence file — review by hand; removal over the gate comes with V0.8")
@@ -77,7 +74,9 @@ public struct ControlAnalyzer {
             return Controllability(level: .displayOnly, actions: [],
                 reason: "plugin bundle (\(item.metadata["plugin-kind"] ?? "plugin")) — loaded by location; "
                     + "removal over the gate comes with V0.8")
-        case .shellProfile, .pathEntry:
+        case .pathEntry:
+            return quarantineControl(item)
+        case .shellProfile:
             return Controllability(level: .displayOnly, actions: [],
                 reason: "shell startup file — launchkeeper never edits shell files; review it in your editor")
         case .listener where item.controlMechanism != .firewall:
@@ -144,5 +143,17 @@ public struct ControlAnalyzer {
         return Controllability(level: .reversible, actions: ["disable", "enable"],
             reason: "launchd override — disable/enable, undo is one command; remove only once provably orphaned",
             mechanism: .launchd)
+    }
+
+    /// V0.8.1 leftover files: `remove` moves them into the quarantine.
+    func quarantineControl(_ item: BackgroundItem) -> Controllability {
+        switch RemediationGate.evaluate(operation: .remove, item: item) {
+        case .denied(let reason):
+            return Controllability(level: .displayOnly, actions: [], reason: reason, mechanism: .quarantine)
+        case .allowed:
+            return Controllability(level: .removable, actions: ["remove"],
+                reason: "provable leftover — remove moves it into the quarantine (sudo), "
+                    + "`launchkeeper quarantine restore` brings it back", mechanism: .quarantine)
+        }
     }
 }

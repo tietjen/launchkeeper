@@ -213,8 +213,9 @@ final class SystemExtensionCorrelationTests: XCTestCase {
         XCTAssertNil(item.appPresent)
         XCTAssertEqual(item.parentApplication, "com.example.goneapp", "named for display")
         XCTAssertEqual(item.metadata["helper-client-app"], "not found via Spotlight")
-        XCTAssertEqual(item.control?.level, .displayOnly)
-        XCTAssertTrue(item.control?.reason.contains("V0.8") == true)
+        // V0.8.1: a helper no job starts is taken away into the quarantine.
+        XCTAssertEqual(item.control?.level, .removable)
+        XCTAssertEqual(item.control?.actions, ["remove"])
     }
 
     func testSystemExtensionsAndKextsBecomeItems() throws {

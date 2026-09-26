@@ -35,6 +35,8 @@ public enum RemediationGate {
             return evaluateLoginHook(operation: operation, item: item)
         case .firewall:
             return evaluateFirewall(operation: operation, item: item)
+        case .quarantine:
+            return evaluateQuarantine(operation: operation, item: item)
         case .launchd, nil:
             break
         }
@@ -148,6 +150,39 @@ public enum RemediationGate {
         let canonical = PathUtils.canonicalize(path)
         if PathUtils.isApplePlatformPath(canonical) || canonical.hasPrefix("/System") {
             return .denied(reason: "Apple platform binary — its firewall rule is read-only by policy")
+        }
+        return .allowed
+    }
+
+    /// Where each leftover kind may be taken from — the exact parent, never
+    /// a subdirectory (V0.8.1).
+    public static let quarantineParents: [ItemType: Set<String>] = [
+        .privilegedHelper: ["/Library/PrivilegedHelperTools"],
+        .startupItem: ["/Library/StartupItems"],
+        .pathEntry: ["/etc/paths.d", "/private/etc/paths.d", "/etc/manpaths.d", "/private/etc/manpaths.d"],
+    ]
+
+    /// Leftover files (V0.8.1): nothing to switch — `remove` moves them into
+    /// the quarantine, and only when they are provably orphaned (a helper no
+    /// job starts, a StartupItem nothing runs, a paths.d file whose every
+    /// entry is gone). The file-level checks continue in the cleanup engine
+    /// (on-disk type, Apple claims, paths.d re-read).
+    static func evaluateQuarantine(operation: RemediationOperation, item: BackgroundItem) -> GateDecision {
+        guard operation == .remove else {
+            return .denied(reason: "leftover file — nothing to \(operation.rawValue); `remove` moves it into the "
+                + "quarantine (restorable)")
+        }
+        guard let parents = quarantineParents[item.type], let path = item.path, path.hasPrefix("/"),
+              !path.contains("/.."), !(path as NSString).lastPathComponent.hasPrefix("."),
+              parents.contains((path as NSString).deletingLastPathComponent) else {
+            return .denied(reason: "not a direct entry of an allowed leftover location "
+                + "(/Library/PrivilegedHelperTools, /Library/StartupItems, /etc/paths.d, /etc/manpaths.d)")
+        }
+        if PathUtils.isApplePlatformPath(PathUtils.canonicalize(path)) {
+            return .denied(reason: "Apple platform path — read-only by policy")
+        }
+        guard item.orphaned else {
+            return .denied(reason: "not orphaned — only provable leftovers are taken away")
         }
         return .allowed
     }

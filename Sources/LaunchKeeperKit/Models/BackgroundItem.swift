@@ -119,7 +119,7 @@ public struct BackgroundItem: Codable {
     }
 }
 
-public enum ItemType: String, Codable {
+public enum ItemType: String, Codable, Sendable {
     case launchAgentUser = "user-agent"
     case launchAgentSystem = "system-agent"
     case launchDaemon = "daemon"
@@ -241,6 +241,9 @@ extension BackgroundItem {
         // A listening process that already has a firewall rule: its switch
         // is that rule. Without one there is nothing to flip back exactly.
         case .listener where metadata["firewall"] != nil: return .firewall
+        // Leftover files: nothing to switch, only to take away (V0.8.1).
+        case .privilegedHelper where !launchdPresent && !plistPresent: return .quarantine
+        case .startupItem, .pathEntry: return .quarantine
         default: break
         }
         if let label, !label.isEmpty { return .launchd }

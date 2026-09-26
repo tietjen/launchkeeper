@@ -257,7 +257,9 @@ final class ScheduledLegacyPluginCorrelationTests: XCTestCase {
         XCTAssertEqual(startup.category, .legacy)
         XCTAssertTrue(startup.orphaned)
         XCTAssertEqual(startup.orphanConfidence, .medium)
-        XCTAssertTrue(startup.control?.reason.contains("OS X 10.10") == true)
+        // V0.8.1: a StartupItem is a provable leftover — remove quarantines it.
+        XCTAssertEqual(startup.control?.level, .removable)
+        XCTAssertEqual(startup.control?.mechanism, .quarantine)
         let hook = try XCTUnwrap(items.first { $0.key == "hook:LoginHook:system" })
         XCTAssertTrue(hook.orphaned, "hook script missing → executable missing")
         // V0.7.0: hooks are parked, reversibly (system plist via sudo).

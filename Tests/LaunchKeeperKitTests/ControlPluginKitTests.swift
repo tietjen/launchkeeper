@@ -301,7 +301,11 @@ final class ControlMatrixInvariantTests: XCTestCase {
                                     category: .systemExtensions)
         let shell = BackgroundItem(key: "shell:~/.zshrc", displayName: ".zshrc", type: .shellProfile,
                                    category: .shellStartup)
-        return [launchd, appleJob, cron, hook, rule, ext, sysext, shell]
+        var helper = BackgroundItem(key: "helper:com.vendor.h", displayName: "h", type: .privilegedHelper,
+                                    path: "/Library/PrivilegedHelperTools/com.vendor.h", domain: .system,
+                                    orphaned: true, category: .privilegedHelpers)
+        helper.orphanReasons = ["no daemon"]
+        return [launchd, appleJob, cron, hook, rule, ext, sysext, shell, helper]
     }
 
     func testEveryPromisedActionPassesTheGateAndDisplayOnlyPromisesNothing() {
@@ -320,8 +324,8 @@ final class ControlMatrixInvariantTests: XCTestCase {
             } else {
                 XCTAssertEqual(control.mechanism, item.controlMechanism, "\(item.key): matrix and dispatch disagree")
             }
-            // Nothing outside launchd is ever removable here.
-            if item.controlMechanism != .launchd {
+            // `remove` exists for launchd plists and quarantined leftovers only.
+            if item.controlMechanism != .launchd && item.controlMechanism != .quarantine {
                 XCTAssertFalse(control.actions.contains("remove"), item.key)
             }
         }

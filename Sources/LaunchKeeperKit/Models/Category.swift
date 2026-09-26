@@ -65,6 +65,9 @@ public enum ControlMechanism: String, Codable, CaseIterable, Sendable {
     case loginHook = "login-hook"
     /// An Application Firewall rule: block / allow incoming connections.
     case firewall
+    /// A leftover file moved into the quarantine by `remove` (V0.8.1):
+    /// helpers without a job, StartupItems, dead paths.d entries.
+    case quarantine
 }
 
 public struct Controllability: Codable, Equatable, Sendable {
