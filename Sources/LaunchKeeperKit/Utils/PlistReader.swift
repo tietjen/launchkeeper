@@ -24,11 +24,14 @@ public enum PlistReader {
         var program: String?
         var arguments: [String] = []
 
+        // launchd runs `Program` when it is set and passes ProgramArguments
+        // as argv (argv[0] is then only a name); without `Program`,
+        // ProgramArguments[0] is the executable.
         if let args = dict["ProgramArguments"] as? [String], let first = args.first {
             program = first
             arguments = Array(args.dropFirst())
         }
-        if program == nil, let prog = dict["Program"] as? String {
+        if let prog = dict["Program"] as? String, !prog.isEmpty {
             program = prog
         }
         // ProgramArgumentsFile style (rare) is ignored as a program source; recorded as unknown key.

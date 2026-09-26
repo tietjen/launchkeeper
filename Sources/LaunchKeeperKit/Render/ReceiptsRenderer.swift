@@ -14,6 +14,18 @@ public struct ReceiptsView: Codable, Equatable {
         /// Inventory items attributed to this receipt (display name).
         public var items: [String]
         public var apple: Bool
+        /// Paths only this package owns — without shared folders
+        /// (`/Applications`, `/Library` …), paths other receipts list too, and
+        /// AppleDouble entries. Optional so older JSON still decodes.
+        ///
+        /// Why: `fileCount`/`missingFiles` count every listed path. A receipt
+        /// whose app was dragged to the Trash still has "1 present" — the
+        /// `/Applications` folder itself (live: ai.abacus.abacusai, 15,245
+        /// listed, the one present was /Applications). Judged by its own
+        /// files, such a package is gone, not "partially installed".
+        public var ownFileCount: Int?
+        /// Own paths that are no longer on disk.
+        public var ownMissingFiles: Int?
     }
     public var rows: [Row]
     public var indexed: Bool
@@ -30,11 +42,20 @@ public struct ReceiptsView: Codable, Equatable {
         }
         var rows: [Row] = []
         for receipt in index.receipts.values where includeApple || !receipt.isApple {
-            let missing = receipt.files.filter { !fileManager.fileExists(atPath: $0) }.count
+            var missing = 0, own = 0, ownMissing = 0
+            for path in receipt.files {
+                let exists = fileManager.fileExists(atPath: path)
+                if !exists { missing += 1 }
+                let appleDouble = (path as NSString).lastPathComponent.hasPrefix("._")
+                guard !appleDouble, !ReceiptIndex.isSharedRoot(path), !index.shared.contains(path) else { continue }
+                own += 1
+                if !exists { ownMissing += 1 }
+            }
             rows.append(Row(id: receipt.id, version: receipt.version,
                             installedAt: receipt.installTime.map(ProvenanceResolver.dayString),
                             fileCount: receipt.files.count, missingFiles: missing,
-                            items: (itemsByPackage[receipt.id] ?? []).sorted(), apple: receipt.isApple))
+                            items: (itemsByPackage[receipt.id] ?? []).sorted(), apple: receipt.isApple,
+                            ownFileCount: own, ownMissingFiles: ownMissing))
         }
         // Newest first; ties by id.
         rows.sort { a, b in

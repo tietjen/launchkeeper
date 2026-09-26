@@ -5,6 +5,34 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.9.4] — 2026-09-26
+
+### Added
+- `EffectiveProgram`: what an entry really runs when its executable is an
+  interpreter or launcher — shells (script, `-c`), Python (script, `-m`,
+  `-c`), Perl/Ruby/PHP/Node/osascript (script or inline code), `open` (app),
+  and launcher chains (`arch`, `env`, `nohup`, `nice`, `caffeinate`). Every
+  entry carries it as metadata (`runs`, `runs-target`, `runs-kind`), visible
+  in `inspect` and `--json`. Live: "arch" entries are Brother's print
+  servers, "bash" entries the scripts they run.
+- Package receipts count their **own** files too (`ownFileCount`,
+  `ownMissingFiles`): without shared folders like `/Applications`, paths
+  other receipts list, and AppleDouble entries. Live: a receipt with 15,245
+  paths had "1 present" — `/Applications` itself; by its own files the
+  package is gone.
+
+### Changed
+- Orphan rule "script missing" now checks only the payload the interpreter
+  actually runs (and the binary behind `arch`/`env` …) — an output file
+  among the arguments no longer marks an entry as orphaned. Reason text:
+  `script missing: <path> (run by bash)` / `program missing: <path> (run by arch)`.
+
+### Fixed
+- A launchd plist with both `Program` and `ProgramArguments` runs `Program`;
+  the inventory used `ProgramArguments[0]` as the executable.
+
+8 new tests (338 total).
+
 ## [0.9.3] — 2026-09-26
 
 ### Changed

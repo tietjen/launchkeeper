@@ -396,6 +396,7 @@ public struct ScanCoordinator {
             checks.append("app context: \(withParentApp) items with parent app, "
                 + "\(appResolver.spotlightQueries.count) Spotlight lookups (\(spotlightState))")
         }
+        EffectiveProgram.annotate(&analyzed)
         OrphanDetector(fileManager: env.fileManager).apply(to: &analyzed)
         RiskAnalyzer(fileManager: env.fileManager).apply(to: &analyzed)
         // V0.5: control matrix + provenance, after orphan detection (both read it).
@@ -517,6 +518,7 @@ public struct ScanCoordinator {
         }
         var appResolver = AppContextResolver(fileManager: fm, runner: runner)
         appResolver.apply(to: &analyzed)
+        EffectiveProgram.annotate(&analyzed)
         OrphanDetector(fileManager: fm).apply(to: &analyzed)
         RiskAnalyzer(fileManager: fm).apply(to: &analyzed)
         ProvenanceResolver(fileManager: fm, receipts: nil).apply(to: &analyzed)

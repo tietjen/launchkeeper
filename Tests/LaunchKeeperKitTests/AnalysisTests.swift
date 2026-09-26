@@ -46,7 +46,8 @@ final class OrphanDetectorTests: XCTestCase {
         let result = apply(item)
         XCTAssertTrue(result.orphaned)
         XCTAssertEqual(result.orphanConfidence, .medium)
-        XCTAssertTrue(result.orphanReasons.contains { $0.hasPrefix("script argument missing") })
+        XCTAssertTrue(result.orphanReasons.contains { $0 == "script missing: /nonexistent-xyz-dir/gone.sh (run by bash)" },
+                      "\(result.orphanReasons)")
     }
 
     func testMissingParentAppBundle() {

@@ -30,14 +30,17 @@ public struct OrphanDetector {
                 }
             }
 
-            // 2. Shell-interpreter service whose script argument is gone.
-            if let exec = item.executable, isInterpreterLike(exec) {
-                for arg in item.arguments where arg.hasPrefix("/") {
-                    if !PathUtils.exists(arg, fileManager: fileManager) {
-                        reasons.append("script argument missing: \(arg)")
-                        raise(.medium)
-                    }
-                }
+            // 2. Interpreter or launcher whose payload is gone: the script
+            // (`bash /x/run.sh`) or the binary (`arch -arm64 /opt/x/tool`).
+            // Only the argument the interpreter actually runs counts — an
+            // output file among the other arguments does not (V0.9.4;
+            // before, every absolute argument was treated as the script).
+            if let program = EffectiveProgram.resolve(executable: item.executable, arguments: item.arguments),
+               let target = program.targetPath, program.kind == .script || program.kind == .binary,
+               !PathUtils.exists(target, fileManager: fileManager) {
+                reasons.append((program.kind == .script ? "script missing: " : "program missing: ") + target
+                    + " (run by \((program.launchers.last.map { ($0 as NSString).lastPathComponent }) ?? "?"))")
+                raise(.medium)
             }
 
             // 3. Login-item helper whose parent application bundle is gone.
@@ -123,14 +126,5 @@ public struct OrphanDetector {
             }
             items[index] = item
         }
-    }
-
-    private func isInterpreterLike(_ exec: String) -> Bool {
-        if PathUtils.shellInterpreters.contains(exec) { return true }
-        let known: Set<String> = ["bash", "sh", "zsh", "dash", "csh", "tcsh", "ksh",
-                                  "osascript", "python", "python3", "perl", "ruby", "node"]
-        guard exec.hasPrefix("/bin/") || exec.hasPrefix("/usr/bin/")
-            || exec.hasPrefix("/usr/local/bin/") || exec.hasPrefix("/opt/homebrew/bin/") else { return false }
-        return known.contains((exec as NSString).lastPathComponent)
     }
 }
