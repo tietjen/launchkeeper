@@ -51,7 +51,7 @@ public struct ScanOptions: Sendable {
     }
 }
 
-public struct ScanReport {
+public struct ScanReport: Sendable {
     public var items: [BackgroundItem]
     public var uncorrelated: [String]
     public var warnings: [String]

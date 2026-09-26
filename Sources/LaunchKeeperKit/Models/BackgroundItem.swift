@@ -3,7 +3,7 @@ import Foundation
 /// One normalized background component as seen across ALL sources.
 /// A single item may be backed by several plists, launchd jobs and BTM records —
 /// correlation is deliberately many-to-one (a BTM entry is NOT one plist).
-public struct BackgroundItem: Codable {
+public struct BackgroundItem: Codable, Sendable {
     /// Display id, assigned per scan run ("01", "02", ...), stable only within a run.
     public var id: String
     /// Stable identity across sources within one run: used by `inspect`.
@@ -156,13 +156,13 @@ public enum ItemDomain: String, Codable, Sendable {
     case mixed
 }
 
-public enum Confidence: String, Codable {
+public enum Confidence: String, Codable, Sendable {
     case high
     case medium
     case low
 }
 
-public enum EvidenceKind: String, Codable {
+public enum EvidenceKind: String, Codable, Sendable {
     case plist
     case launchd
     case btm
@@ -181,7 +181,7 @@ public enum EvidenceKind: String, Codable {
     case firewall = "firewall"
 }
 
-public struct SourceEvidence: Codable, Equatable {
+public struct SourceEvidence: Codable, Equatable, Sendable {
     public var kind: EvidenceKind
     public var detail: String
     public var confidence: Confidence

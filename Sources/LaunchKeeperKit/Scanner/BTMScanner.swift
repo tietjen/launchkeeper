@@ -110,8 +110,8 @@ public enum BTMDumpParser {
 /// every container reads `disabled` while its components read `enabled`
 /// (seen live 2026-09-22: 48 of 49). The switch state is therefore derived
 /// from the components in `BackgroundView`; the raw bit is kept for the JSON.
-public struct BTMContainer: Codable, Equatable {
-    public enum Kind: String, Codable { case app, developer }
+public struct BTMContainer: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable { case app, developer }
     public var identifier: String
     public var name: String
     public var kind: Kind
