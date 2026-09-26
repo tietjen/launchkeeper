@@ -81,6 +81,10 @@ public struct LeftoverPath: Codable, Equatable, Sendable {
     public var kind: String
     public var bytes: UInt64
     public var needsRoot: Bool
+
+    public init(path: String, kind: String, bytes: UInt64, needsRoot: Bool) {
+        self.path = path; self.kind = kind; self.bytes = bytes; self.needsRoot = needsRoot
+    }
 }
 
 public enum AppPresence: Equatable, Sendable {
@@ -108,6 +112,11 @@ public struct AppLeftoverCandidate: Sendable {
     /// What shows it was an app: a sandbox container, saved window state …
     public var appEvidence: [String]
     public var totalBytes: UInt64 { paths.reduce(0) { $0 + $1.bytes } }
+
+    public init(bundleIdentifier: String, paths: [LeftoverPath], presence: AppPresence, appEvidence: [String]) {
+        self.bundleIdentifier = bundleIdentifier; self.paths = paths
+        self.presence = presence; self.appEvidence = appEvidence
+    }
 }
 
 /// The three sources — injectable, so tests never ask the real system.

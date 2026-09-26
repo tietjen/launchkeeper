@@ -9,7 +9,7 @@ import Foundation
 
 /// Reads `/x` as `<root>/x`. `/etc`, `/var`, `/tmp` fall back to
 /// `<root>/private/…` when the root is a Data volume without the links.
-public final class RootedFileManager: FileManager, @unchecked Sendable {
+public final class RootedFileManager: FileManager {
     public let root: String
 
     public init(root: String) {

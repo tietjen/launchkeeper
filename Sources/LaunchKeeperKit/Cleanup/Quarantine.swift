@@ -12,6 +12,10 @@ public struct QuarantineMove: Codable, Equatable, Sendable {
     /// Where it is now, inside the quarantine's `files/` tree.
     public var quarantined: String
     public var kind: String
+
+    public init(original: String, quarantined: String, kind: String) {
+        self.original = original; self.quarantined = quarantined; self.kind = kind
+    }
 }
 
 public struct QuarantineManifest: Codable, Equatable, Sendable {
@@ -29,6 +33,14 @@ public struct QuarantineManifest: Codable, Equatable, Sendable {
     /// planned | applied-ok | applied-fail(…) | restored | restore-fail(…)
     public var status: String
     public var notes: [String]
+
+    public init(name: String, kind: String, createdAt: String, toolVersion: String, packageIdentifier: String?,
+                version: String?, moves: [QuarantineMove], receiptCopies: [String], forgot: Bool, status: String,
+                notes: [String]) {
+        self.name = name; self.kind = kind; self.createdAt = createdAt; self.toolVersion = toolVersion
+        self.packageIdentifier = packageIdentifier; self.version = version; self.moves = moves
+        self.receiptCopies = receiptCopies; self.forgot = forgot; self.status = status; self.notes = notes
+    }
 }
 
 public struct QuarantineStore {
@@ -40,7 +52,7 @@ public struct QuarantineStore {
         self.fileManager = fileManager
     }
 
-    public static let toolVersion = "0.9.2"
+    public static let toolVersion = "0.9.3"
 
     /// A name is one path component of our own making — never a path.
     public static func isValidName(_ name: String) -> Bool {

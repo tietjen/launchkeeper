@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.9.3] — 2026-09-26
+
+### Changed
+- For the SwiftUI app (`launchkeeper-app`): the model types a scan returns
+  (`BackgroundItem`, `ScanReport`, `SourceEvidence`, `BTMContainer` …) are
+  `Sendable`; `ListFilter.isAppleInternal` is public; `AppLeftoverCandidate`,
+  `LeftoverPath`, `QuarantineManifest` and `QuarantineMove` have public
+  initializers.
+
+### Fixed
+- `RootedFileManager` no longer claims a `Sendable` conformance its
+  `FileManager` superclass rules out (warning in release builds).
+
 ## [0.9.2] — 2026-09-26
 
 ### Added
