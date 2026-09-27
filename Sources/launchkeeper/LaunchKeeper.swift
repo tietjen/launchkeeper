@@ -947,6 +947,12 @@ struct DisableCommand: ParsableCommand {
 
     @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
     var ids: [String]
+
+    /// `[String]` arguments accept zero values; without a target a batch
+    /// would scan and report "0 of 0" with exit 0 (review 2026-09-27).
+    func validate() throws {
+        if ids.isEmpty { throw ValidationError("give at least one target (display id, label, name or key)") }
+    }
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("json"), help: "machine-readable output")
@@ -964,6 +970,12 @@ struct EnableCommand: ParsableCommand {
 
     @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
     var ids: [String]
+
+    /// `[String]` arguments accept zero values; without a target a batch
+    /// would scan and report "0 of 0" with exit 0 (review 2026-09-27).
+    func validate() throws {
+        if ids.isEmpty { throw ValidationError("give at least one target (display id, label, name or key)") }
+    }
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("now"), help: "bootstrap the job again after enabling")
@@ -1107,6 +1119,12 @@ struct RemoveCommand: ParsableCommand {
 
     @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
     var ids: [String]
+
+    /// `[String]` arguments accept zero values; without a target a batch
+    /// would scan and report "0 of 0" with exit 0 (review 2026-09-27).
+    func validate() throws {
+        if ids.isEmpty { throw ValidationError("give at least one target (display id, label, name or key)") }
+    }
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("json"), help: "machine-readable output")
@@ -1227,7 +1245,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.11.0).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.11.1).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1238,7 +1256,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.11.0",
+        version: "0.11.1",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

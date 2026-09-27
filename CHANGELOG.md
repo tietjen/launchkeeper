@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.11.1] — 2026-09-27
+
+Findings of an independent review (Fable) of the 0.11 batches.
+
+### Fixed
+- **Batch removals kept their way back.** Snapshot names have one-second
+  resolution; two `remove`s of one batch in the same second shared one
+  snapshot, and the second overwrote its manifest without the first file —
+  the first removal could no longer be restored. Every snapshot now gets a
+  directory of its own (a suffix when the name is taken).
+- `disable`, `enable` and `remove` without a target are a usage error again
+  (0.11.0 scanned and reported "0 of 0" with exit 0).
+- Entries a batch skips (stopped, or the same entry twice) get an audit line.
+
+2 new tests (349 total).
+
 ## [0.11.0] — 2026-09-27
 
 ### Added

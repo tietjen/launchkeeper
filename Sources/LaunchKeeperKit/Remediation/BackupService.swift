@@ -28,7 +28,7 @@ public struct BackupEnvironment {
                 backupsRoot: String? = nil, legacyBackupsRoots: [String]? = nil,
                 runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default, home: String = NSHomeDirectory(),
-                uid: Int = -1, toolVersion: String = "0.11.0") {
+                uid: Int = -1, toolVersion: String = "0.11.1") {
         self.launchDirs = launchDirs ?? [
             home + "/Library/LaunchAgents", home + "/Library/LaunchDaemons",
             "/Library/LaunchAgents", "/Library/LaunchDaemons",
@@ -116,14 +116,32 @@ public struct BackupService {
 
     public func create(label: String? = nil, now: Date = Date()) -> Result<BackupReport, BackupFailure> {
         let fm = env.fileManager
-        let name = makeBackupName(label: label, now: now)
-        let dir = env.backupsRoot + "/" + name
-        let filesDir = dir + "/files"
+        // Every snapshot gets a directory of its own. Names have one-second
+        // resolution; two removals of a batch (V0.11) in the same second
+        // used to share — and overwrite — one snapshot, so the first removal
+        // lost its way back (review 2026-09-27). Creating the directory
+        // without intermediates fails when it exists; then a suffix is tried.
+        let baseName = makeBackupName(label: label, now: now)
+        var name = baseName
+        var dir = env.backupsRoot + "/" + name
         do {
-            try fm.createDirectory(atPath: filesDir, withIntermediateDirectories: true)
+            try fm.createDirectory(atPath: env.backupsRoot, withIntermediateDirectories: true)
+            var attempt = 1
+            while true {
+                do {
+                    try fm.createDirectory(atPath: dir, withIntermediateDirectories: false)
+                    break
+                } catch where fm.fileExists(atPath: dir) && attempt < 1000 {
+                    attempt += 1
+                    name = baseName + "-\(attempt)"
+                    dir = env.backupsRoot + "/" + name
+                }
+            }
+            try fm.createDirectory(atPath: dir + "/files", withIntermediateDirectories: false)
         } catch {
             return .failure(BackupFailure("cannot create backup dir: \(error.localizedDescription)"))
         }
+        let filesDir = dir + "/files"
 
         var entries: [ManifestEntry] = []
         var notes: [String] = []

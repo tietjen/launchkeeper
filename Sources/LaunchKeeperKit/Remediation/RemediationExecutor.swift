@@ -533,11 +533,13 @@ public struct RemediationEngine {
                                            status: .refused("stopped before this entry"),
                                            messages: ["the batch was stopped — nothing ran for this entry"],
                                            plan: [], executed: [], undoHint: nil)
+                audit.append(operation: request.operation.rawValue, target: request.target, status: result.auditStatus)
             } else if let key, !seen.insert(key).inserted {
                 result = RemediationResult(operation: request.operation, target: request.target,
                                            status: .refused("entry already in this batch"),
                                            messages: ["one action per entry and batch — the scan would be stale for a second one"],
                                            plan: [], executed: [], undoHint: nil)
+                audit.append(operation: request.operation.rawValue, target: request.target, status: result.auditStatus)
             } else {
                 result = run(operation: request.operation, target: request.target, apply: apply,
                              now: request.now, allowWorking: request.allowWorking, in: report)

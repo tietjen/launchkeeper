@@ -572,6 +572,41 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertEqual(setup.runner.launchd.disabled, ["com.example.calm", "com.example.quiet"])
     }
 
+    func testBatchRemovalsInOneSecondKeepTheirOwnSnapshots() throws {
+        // Review 2026-09-27 (blocker): two removals in the same second shared
+        // one snapshot name; the second overwrote the manifest without the
+        // first file, so the first removal could not be restored.
+        let setup = try makeSetup(entries: [("de.launchkeeper.ghost", ghostArgs), ("de.launchkeeper.ghost2", ghostArgs)])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        let results = setup.engine.runBatch([
+            RemediationRequest(operation: .remove, target: "de.launchkeeper.ghost"),
+            RemediationRequest(operation: .remove, target: "de.launchkeeper.ghost2"),
+        ], apply: true, scanOptions: userOnly)
+        XCTAssertEqual(results.map(\.status), [.appliedOk, .appliedOk], "\(results.map(\.messages))")
+        let snapshots = snapshotNames(setup).sorted()
+        XCTAssertEqual(snapshots.count, 2, "one snapshot per removal: \(snapshots)")
+        // Each undo names its own snapshot, and that snapshot holds the removed file.
+        for (result, label) in zip(results, ["de.launchkeeper.ghost.plist", "de.launchkeeper.ghost2.plist"]) {
+            let name = try XCTUnwrap(snapshots.first { result.undoHint?.contains($0) == true }, "\(result.undoHint ?? "")")
+            let manifest = try String(contentsOfFile: setup.backupsRoot + "/" + name + "/manifest.json", encoding: .utf8)
+            XCTAssertTrue(manifest.contains(label), "\(name) must contain \(label)")
+        }
+    }
+
+    func testSnapshotsInTheSameSecondGetDistinctNames() throws {
+        let root = tempRoot("samesecond")
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let env = BackupEnvironment(launchDirs: [root + "/agents"], systemDirPrefixes: [], backupsRoot: root + "/backups",
+                                    runner: FakeLaunchd(), home: root, uid: 501)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        guard case .success(let first) = BackupService(env: env).create(label: "pre-remove", now: now),
+              case .success(let second) = BackupService(env: env).create(label: "pre-remove", now: now) else {
+            return XCTFail("both snapshots must be written")
+        }
+        XCTAssertNotEqual(first.backupName, second.backupName)
+        XCTAssertTrue(second.backupName.hasPrefix(first.backupName), "\(second.backupName)")
+    }
+
     func testBatchStopsBetweenEntries() throws {
         let setup = try makeSetup(entries: [("com.example.calm", calmArgs), ("com.example.quiet", calmArgs)])
         defer { try? FileManager.default.removeItem(atPath: setup.root) }
