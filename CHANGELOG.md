@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.12.1] — 2026-09-27
+
+### Security
+- `RemediationEnvironment.systemScopeOnly` (set by the app's privileged
+  helper): entries that belong to one user — user domain, per-user app
+  extension elections, a config file in the user's home — are refused for
+  root. A system daemon whose *program* lives in a home (a common adware
+  pattern) stays changeable: only the file root writes counts.
+- `CleanupEnvironment.forbiddenMovePrefixes` and `requireRootOwnedParents`
+  (set by the helper): `uninstall` refuses packages that would move files
+  out of places a non-root user can change — `/Users/`, temp directories,
+  `/Volumes/`, `/opt/homebrew/`, and any path whose parent chain is not
+  root-owned or is world-writable (`PathUtils.userWritableAncestor`; covers
+  `/usr/local` on Intel Homebrew Macs and `/Library/Caches`). Checked before
+  anything is read as root.
+
+3 new tests (354 total).
+
 ## [0.12.0] — 2026-09-27
 
 ### Security

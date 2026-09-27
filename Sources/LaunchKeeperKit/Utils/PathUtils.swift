@@ -57,6 +57,30 @@ public enum PathUtils {
             || path.hasPrefix("/sbin/") || path.hasPrefix("/usr/libexec/")
     }
 
+    /// V0.12.1: the first directory on the way to `path` (from `/` down to
+    /// its parent) that a non-root user could change: not owned by root, or
+    /// writable by everyone (sticky 1777 included). Components are resolved
+    /// (`stat`, not `lstat`), so `/tmp` is judged as `/private/tmp`. Group
+    /// write (root:admin — /Applications, /Library/Preferences) is accepted:
+    /// only administrators can use it, and they can become root anyway.
+    /// Stops at the first component that does not exist (root creates the
+    /// rest). Root moving files through such a chain is a rename/symlink race
+    /// (review 2026-09-27, C-2/S1/S2).
+    /// - Parameters:
+    ///   - path: The path root is about to move or create.
+    ///   - rootPrefix: Offline-root prefix (`DiskView.rootPrefix`), "" live.
+    /// - Returns: The offending directory, or `nil` when the chain is safe.
+    public static func userWritableAncestor(of path: String, rootPrefix: String = "") -> String? {
+        var walked = ""
+        for component in (path as NSString).deletingLastPathComponent.split(separator: "/") {
+            walked += "/" + component
+            var info = stat()
+            guard stat(rootPrefix + walked, &info) == 0 else { return nil }
+            if info.st_uid != 0 || info.st_mode & S_IWOTH != 0 { return walked }
+        }
+        return nil
+    }
+
     /// Owner name + whether the backing file is writable by its owner being non-root.
     public static func ownerInfo(_ path: String, fileManager: FileManager = .default) -> (name: String, writableByUser: Bool)? {
         guard let attrs = try? fileManager.attributesOfItem(atPath: path) else { return nil }

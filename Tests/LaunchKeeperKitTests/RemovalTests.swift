@@ -624,9 +624,20 @@ final class RemovalEngineTests: XCTestCase {
         let system = BackgroundItem(key: "d", displayName: "d", type: .launchDaemon, path: "/Library/LaunchDaemons/d.plist",
                                     label: "d", domain: .system)
         XCTAssertNil(RemediationEngine.userScopeReason(system, home: "/Users/alice"))
-        var inHome = system
-        inHome.executable = "/Users/alice/bin/tool"
-        XCTAssertNotNil(RemediationEngine.userScopeReason(inHome, home: "/Users/alice"))
+        // Review B1: a SYSTEM daemon whose program lives in a home stays the helper's job.
+        var adware = system
+        adware.executable = "/Users/alice/Library/.hidden/agent"
+        XCTAssertNil(RemediationEngine.userScopeReason(adware, home: "/Users/alice"))
+        var fileInHome = system
+        fileInHome.path = "/Users/alice/Library/Preferences/com.apple.loginwindow.plist"
+        XCTAssertNotNil(RemediationEngine.userScopeReason(fileInHome, home: "/Users/alice"))
+        XCTAssertNil(RemediationEngine.userScopeReason(system, home: "/"), "a service account's home never matches")
+        var extensionElection = system
+        extensionElection.metadata["ext-identifier"] = "com.vendor.ext"
+        extensionElection.type = .appExtension
+        if extensionElection.controlMechanism == .pluginkit {
+            XCTAssertNotNil(RemediationEngine.userScopeReason(extensionElection, home: "/Users/alice"))
+        }
     }
 
     func testBatchStopsBetweenEntries() throws {

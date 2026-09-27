@@ -272,6 +272,24 @@ final class CleanupUninstallTests: XCTestCase {
         XCTAssertTrue(reason.contains("user-writable"), reason)
         XCTAssertTrue(fake.mutations.isEmpty, "nothing moved, nothing forgotten")
         XCTAssertTrue(CleanupEnvironment.userWritablePrefixes.contains("/Users/"))
+        XCTAssertTrue(CleanupEnvironment.userWritablePrefixes.contains("/opt/homebrew/"))
+    }
+
+    func testUserChangeableParentChainsAreFoundDynamically() {
+        // Review S1: places no static list knows. Live system paths, read-only checks.
+        XCTAssertNil(PathUtils.userWritableAncestor(of: "/Library/LaunchDaemons/x.plist"), "root-owned chain")
+        XCTAssertNil(PathUtils.userWritableAncestor(of: "/Applications/Tool.app"), "root:admin g+w is accepted")
+        XCTAssertEqual(PathUtils.userWritableAncestor(of: "/tmp/x/y"), "/tmp", "1777 (resolved through the /tmp link)")
+        XCTAssertNotNil(PathUtils.userWritableAncestor(of: NSHomeDirectory() + "/Library/x"), "a user's home")
+        // The test root is owned by the test user: every move from it is refused when required.
+        let fake = FakeInstaller(root: root)
+        toolPackage(fake)
+        var guarded = engine(fake)
+        guarded.environment.requireRootOwnedParents = true
+        guard case .refused = guarded.uninstall(packageIdentifier: "com.vendor.tool", apply: true).status else {
+            return XCTFail("a user-owned parent chain must refuse")
+        }
+        XCTAssertTrue(fake.mutations.isEmpty, "refused before anything ran as root, checksums included")
     }
 
     func testApplyMovesIntoQuarantineAndRestorePutsEverythingBack() throws {

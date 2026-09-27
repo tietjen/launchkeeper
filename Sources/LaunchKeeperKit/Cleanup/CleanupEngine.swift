@@ -27,9 +27,25 @@ public struct CleanupEnvironment {
     /// `CleanupEnvironment.userWritablePrefixes` (review 2026-09-27, C-2).
     public var forbiddenMovePrefixes: [String] = []
 
+    /// V0.12.1: also refuse moves whose parent chain a non-root user could
+    /// change (`PathUtils.userWritableAncestor`) — catches user-owned places no
+    /// static list knows: /opt/homebrew, /usr/local on Intel Homebrew Macs,
+    /// /Library/Caches (1777). Set by the privileged helper.
+    public var requireRootOwnedParents = false
+
     /// Directories other users (or everyone) can write into.
     public static let userWritablePrefixes = ["/Users/", "/tmp/", "/private/tmp/", "/var/tmp/", "/private/var/tmp/",
-                                              "/Volumes/"]
+                                              "/Volumes/", "/opt/homebrew/"]
+
+    /// Why root must not move `path`, or `nil` (forbidden prefix, or a
+    /// user-changeable directory on the way when `requireRootOwnedParents`).
+    public func unsafeMoveReason(_ path: String) -> String? {
+        if forbiddenMovePrefixes.contains(where: { path.hasPrefix($0) }) { return "\(path) lies where users can write" }
+        if requireRootOwnedParents, let dir = PathUtils.userWritableAncestor(of: path, rootPrefix: disk.rootPrefix) {
+            return "\(path): \(dir) can be changed by a non-root user"
+        }
+        return nil
+    }
 
     public init(runner: CommandRunner = SystemCommandRunner(), disk: DiskView = DiskView(),
                 home: String = NSHomeDirectory(), quarantineRoot: String? = nil,
@@ -177,6 +193,13 @@ public struct CleanupEngine {
         var analysis = analyze([:])
         var rootNotes: [String] = []
         let unreadable = analysis.paths.filter { $0.status == .unreadable }.map(\.path)
+        // Before anything is read as root (checksums): nothing that could move
+        // may lie where users can write (review 2026-09-27).
+        if let reason = (analysis.moveRoots + unreadable).lazy.compactMap(environment.unsafeMoveReason).first {
+            return finish(.refused("package moves files from a user-writable place"),
+                          ["refused: \(reason) — root does not move files from there; "
+                           + "uninstall this package in Terminal (launchkeeper uninstall)"], analysis: analysis)
+        }
         if !unreadable.isEmpty {
             if apply || verifyAsRoot {
                 switch rootChecksums(unreadable) {
@@ -197,11 +220,10 @@ public struct CleanupEngine {
         if !analysis.canForget {
             messages.append("receipt stays: " + analysis.forgetBlockers.joined(separator: "; "))
         }
-        if let root = analysis.moveRoots.first(where: { path in
-            environment.forbiddenMovePrefixes.contains { path.hasPrefix($0) } }) {
+        if let reason = analysis.moveRoots.lazy.compactMap(environment.unsafeMoveReason).first {
             return finish(.refused("package moves files from a user-writable place"),
-                          messages + ["refused: \(root) lies where users can write — root does not move files from "
-                                      + "there; uninstall this package in Terminal (launchkeeper uninstall)"],
+                          messages + ["refused: \(reason) — root does not move files from there; "
+                                      + "uninstall this package in Terminal (launchkeeper uninstall)"],
                           analysis: analysis)
         }
         guard !analysis.moveRoots.isEmpty || analysis.canForget else {

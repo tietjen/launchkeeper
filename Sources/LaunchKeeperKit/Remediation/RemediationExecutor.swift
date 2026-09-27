@@ -392,8 +392,7 @@ public struct RemediationEngine {
                           messages: ["ambiguous '\(needle)' (\(candidates.count) matches):"] + candidates)
         case .unique(let item):
             if environment.systemScopeOnly, let reason = Self.userScopeReason(item, home: environment.home) {
-                return finish(.refused(reason), target: item.label ?? item.key,
-                              messages: ["refused: \(reason)", "the app changes the user's own entries itself — no administrator rights needed"])
+                return finish(.refused(reason), target: item.label ?? item.key, messages: ["refused: \(reason)"])
             }
             var target = RemediationPlanner.displayTarget(for: item, uid: environment.uid)
             // A deletion audit line must say WHICH file — target carries the path.
@@ -573,14 +572,17 @@ public struct RemediationEngine {
     ///   - item: The resolved entry.
     ///   - home: The user's home.
     public static func userScopeReason(_ item: BackgroundItem, home: String) -> String? {
-        let homePrefix = (home.hasSuffix("/") ? String(home.dropLast()) : home) + "/"
-        if item.domain == .user { return "user-domain entry — not changed with administrator rights" }
-        switch item.controlMechanism {
-        case .pluginkit: return "app extension elections are per user — not changed with administrator rights"
-        default: break   // a user's crontab is a user-domain entry (above)
+        if item.domain == .user { return "user-domain entry — the app changes it without administrator rights" }
+        if item.controlMechanism == .pluginkit {
+            return "app extension elections are per user — the app changes them without administrator rights"
         }
-        for path in [item.path, item.executable].compactMap({ $0 }) where path.hasPrefix(homePrefix) {
-            return "lives in the user's home (\(path)) — root does not write there"
+        // Only the file root would write (the plist, the config source) counts.
+        // A SYSTEM daemon whose program sits in a home — a classic adware
+        // pattern — stays the helper's job: nothing in the home is written
+        // (review 2026-09-27, B1). `home == "/"` (service accounts) never matches.
+        let trimmed = home.hasSuffix("/") ? String(home.dropLast()) : home
+        if trimmed.count > 1, let path = item.path, path.hasPrefix(trimmed + "/") {
+            return "its file lives in the user's home (\(path)) — root does not write there"
         }
         return nil
     }
