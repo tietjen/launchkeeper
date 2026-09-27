@@ -37,8 +37,9 @@ public struct BackupEnvironment {
         self.backupsRoot = backupsRoot ?? LaunchKeeperPaths.backups(home: home)
         // Only the DEFAULT root inherits the legacy location; explicit roots
         // (tests, custom setups) stay exactly where they point.
+        // V0.12: snapshots the privileged helper took (root-owned) are found too.
         self.legacyBackupsRoots = legacyBackupsRoots
-            ?? (backupsRoot == nil ? [LaunchKeeperPaths.legacyBackups(home: home)] : [])
+            ?? (backupsRoot == nil ? [LaunchKeeperPaths.legacyBackups(home: home), LaunchKeeperPaths.systemBackups] : [])
         self.runner = runner
         self.fileManager = fileManager
         self.uid = uid >= 0 ? uid : Int(getuid())

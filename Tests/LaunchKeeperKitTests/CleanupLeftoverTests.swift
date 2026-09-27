@@ -100,6 +100,31 @@ final class CleanupLeftoverTests: XCTestCase {
                       "a StartupItem moves and returns as a whole folder")
     }
 
+    func testSystemFilesGoToTheRootOwnedQuarantineWithAManifestWrittenThroughSudo() throws {
+        // V0.12 (review 2026-09-27): root never keeps its entries in the user's
+        // home. A system file lands in the system store; its manifest is
+        // written through sudo (cp), so it is root-owned on a real Mac.
+        let fake = FakeInstaller(root: root)
+        write("/Library/PrivilegedHelperTools/com.vendor.helper", "bin")
+        let split = CleanupEngine(environment: CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root), home: home,
+                                                                  quarantineRoot: home + "/quarantine",
+                                                                  systemQuarantineRoot: root + "/Library/Application Support/launchkeeper/quarantine"),
+                                  audit: AuditLog(directory: home + "/logs"))
+        let moved = split.quarantineItem(item(.privilegedHelper, "/Library/PrivilegedHelperTools/com.vendor.helper"), apply: true)
+        XCTAssertEqual(moved.status, .appliedOk, "\(moved.messages)")
+        let name = try XCTUnwrap(moved.quarantine)
+        XCTAssertNotNil(split.systemStore.load(name), "the entry is in the root-owned store")
+        XCTAssertNil(split.store.load(name), "nothing in the user's quarantine")
+        XCTAssertTrue(fake.mutations.contains { $0.hasPrefix("/usr/bin/sudo /bin/cp -- ") && $0.hasSuffix("/manifest.json") },
+                      "manifest written as root: \(fake.mutations)")
+        XCTAssertEqual(split.listAll().map(\.name), [name])
+        XCTAssertTrue(split.locate(name)?.root == split.systemStore.root)
+
+        let back = split.restore(name: name, apply: true)
+        XCTAssertEqual(back.status, .appliedOk, "\(back.messages)")
+        XCTAssertEqual(split.systemStore.load(name)?.status, "restored", "the status update went through sudo too")
+    }
+
     func testPathsFileWithOneLiveEntryIsNotALeftover() {
         let fake = FakeInstaller(root: root)
         write("/opt/tool/bin/.keep", "")

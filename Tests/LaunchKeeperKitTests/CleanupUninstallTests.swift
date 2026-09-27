@@ -136,8 +136,11 @@ final class FakeInstaller: CommandRunner {
             }
             return ok
         case ("/bin/cp", _):
-            guard args.count == 4, args[0] == "-p", args[1] == "--" else { return fail }
-            return (try? fm.copyItem(atPath: args[2], toPath: args[3])) != nil ? ok : fail
+            // "cp -p -- src dst" (receipts) and "cp -- src dst" (V0.12 manifests); cp overwrites.
+            let files = args.first == "-p" ? Array(args.dropFirst()) : args
+            guard files.count == 3, files[0] == "--" else { return fail }
+            try? fm.removeItem(atPath: files[2])
+            return (try? fm.copyItem(atPath: files[1], toPath: files[2])) != nil ? ok : fail
         case ("/bin/rm", _):
             guard args.count == 3, args[0] == "-rf", args[1] == "--" else { return fail }
             try? fm.removeItem(atPath: args[2])

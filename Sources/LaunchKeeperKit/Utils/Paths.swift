@@ -31,6 +31,20 @@ public enum LaunchKeeperPaths {
     public static func quarantine(home: String) -> String {
         home + "/Library/Application Support/\(productName)/quarantine"
     }
+    /// V0.12: launchkeeper's root-owned tree for everything that needs
+    /// administrator rights. Root never keeps its bookkeeping in a user's
+    /// home: every directory there can be renamed or symlinked by any
+    /// process of that user, between root's check and root's write
+    /// (review 2026-09-27). `/Library/Application Support` is root-owned
+    /// and not writable for the group, so nothing on this chain can be swapped.
+    public static let systemRoot = "/Library/Application Support/\(productName)"
+    /// Quarantine entries whose moves need root (system files, packages).
+    public static let systemQuarantine = systemRoot + "/quarantine"
+    /// Launch-dir snapshots taken by root (the privileged helper).
+    public static let systemBackups = systemRoot + "/backups"
+    /// Config snapshots taken by root (the privileged helper).
+    public static let systemConfigSnapshots = systemRoot + "/config-snapshots"
+
     /// V0.6.1: whole-inventory snapshots for `diff`.
     public static func inventorySnapshots(home: String) -> String {
         home + "/Library/Application Support/\(productName)/inventory"

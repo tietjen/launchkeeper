@@ -988,7 +988,9 @@ final class RenameMigrationTests: XCTestCase {
     func testDefaultEnvironmentInheritsLegacyRootOnlyByDefault() {
         let standard = BackupEnvironment(home: "/Users/x")
         XCTAssertEqual(standard.backupsRoot, "/Users/x/Library/Application Support/launchkeeper/backups")
-        XCTAssertEqual(standard.legacyBackupsRoots, ["/Users/x/Library/Application Support/btmctl/backups"])
+        // V0.12: snapshots the privileged helper took (root-owned tree) are read too.
+        XCTAssertEqual(standard.legacyBackupsRoots, ["/Users/x/Library/Application Support/btmctl/backups",
+                                                     "/Library/Application Support/launchkeeper/backups"])
         let explicit = BackupEnvironment(backupsRoot: "/tmp/b", home: "/Users/x")
         XCTAssertEqual(explicit.legacyBackupsRoots, [], "an explicit root never looks elsewhere")
     }

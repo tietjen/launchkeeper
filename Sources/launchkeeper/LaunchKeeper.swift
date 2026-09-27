@@ -706,7 +706,7 @@ struct QuarantineListCommand: ParsableCommand {
 
     mutating func run() throws {
         let engine = CleanupEngine()
-        let entries = engine.store.list()
+        let entries = engine.listAll()   // V0.12: the user's and the root-owned quarantine
         if json { print(try JSONRenderer.encode(entries)); return }
         guard !entries.isEmpty else {
             print("quarantine is empty (\(engine.environment.quarantineRoot))")

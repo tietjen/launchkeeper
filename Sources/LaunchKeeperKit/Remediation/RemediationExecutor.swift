@@ -26,6 +26,9 @@ public struct RemediationEnvironment {
     public var btmCache: BTMDumpCache?
     /// V0.8.1: where `remove` moves leftover files, and the disk it sees.
     public var quarantineRoot: String
+    /// V0.12: the root-owned quarantine for moves that need root (see
+    /// `CleanupEnvironment.systemQuarantineRoot`).
+    public var systemQuarantineRoot: String
     public var disk: DiskView
 
     public init(runner: CommandRunner = SystemCommandRunner(),
@@ -37,7 +40,8 @@ public struct RemediationEnvironment {
                 backupsRoot: String? = nil,
                 configSnapshotsRoot: String? = nil,
                 legacyScanner: LegacyScanner? = nil,
-                quarantineRoot: String? = nil, disk: DiskView? = nil, btmCache: BTMDumpCache? = nil) {
+                quarantineRoot: String? = nil, systemQuarantineRoot: String? = nil,
+                disk: DiskView? = nil, btmCache: BTMDumpCache? = nil) {
         let defaults = BackupEnvironment(fileManager: fileManager, home: home)
         self.runner = runner
         self.fileManager = fileManager
@@ -49,6 +53,8 @@ public struct RemediationEnvironment {
         self.configSnapshotsRoot = configSnapshotsRoot ?? LaunchKeeperPaths.configSnapshots(home: home)
         self.legacyScanner = legacyScanner
         self.quarantineRoot = quarantineRoot ?? LaunchKeeperPaths.quarantine(home: home)
+        self.systemQuarantineRoot = systemQuarantineRoot
+            ?? (quarantineRoot == nil ? LaunchKeeperPaths.systemQuarantine : self.quarantineRoot)
         self.disk = disk ?? DiskView(fileManager: fileManager)
         self.btmCache = btmCache
     }
@@ -398,7 +404,8 @@ public struct RemediationEngine {
                 if item.controlMechanism == .quarantine {
                     let cleanup = CleanupEngine(environment: CleanupEnvironment(
                         runner: environment.runner, disk: environment.disk, home: environment.home,
-                        quarantineRoot: environment.quarantineRoot), audit: audit)
+                        quarantineRoot: environment.quarantineRoot,
+                        systemQuarantineRoot: environment.systemQuarantineRoot), audit: audit)
                     let moved = cleanup.quarantineItem(item, apply: apply)
                     return finish(moved.status, target: target, messages: moved.messages, plan: moved.plan,
                                   executed: moved.executed, undo: moved.undoHint)
@@ -744,7 +751,8 @@ public struct RemediationEngine {
                                                   systemDirPrefixes: environment.systemDirPrefixes)
         let cleanup = CleanupEngine(environment: CleanupEnvironment(
             runner: environment.runner, disk: environment.disk, home: environment.home,
-            quarantineRoot: environment.quarantineRoot), audit: audit)
+            quarantineRoot: environment.quarantineRoot,
+                        systemQuarantineRoot: environment.systemQuarantineRoot), audit: audit)
         let preview = cleanup.quarantineItem(item, apply: false)
         guard case .planned = preview.status else {
             return (preview.status, preview.messages, [], [], nil)
