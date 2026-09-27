@@ -709,7 +709,7 @@ struct QuarantineListCommand: ParsableCommand {
         let entries = engine.listAll()   // V0.12: the user's and the root-owned quarantine
         if json { print(try JSONRenderer.encode(entries)); return }
         guard !entries.isEmpty else {
-            print("quarantine is empty (\(engine.environment.quarantineRoot))")
+            print("quarantine is empty (\(engine.environment.quarantineRoot) and \(engine.environment.systemQuarantineRoot))")
             return
         }
         for entry in entries {
@@ -1245,7 +1245,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.11.1).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.12.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1256,7 +1256,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.11.1",
+        version: "0.12.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,

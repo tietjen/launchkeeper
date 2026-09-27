@@ -28,7 +28,7 @@ public struct BackupEnvironment {
                 backupsRoot: String? = nil, legacyBackupsRoots: [String]? = nil,
                 runner: CommandRunner = SystemCommandRunner(),
                 fileManager: FileManager = .default, home: String = NSHomeDirectory(),
-                uid: Int = -1, toolVersion: String = "0.11.1") {
+                uid: Int = -1, toolVersion: String = "0.12.0") {
         self.launchDirs = launchDirs ?? [
             home + "/Library/LaunchAgents", home + "/Library/LaunchDaemons",
             "/Library/LaunchAgents", "/Library/LaunchDaemons",
@@ -151,6 +151,14 @@ public struct BackupService {
             let contents = (try? fm.contentsOfDirectory(atPath: sourceDir)) ?? []
             for file in contents.sorted() where file.hasSuffix(".plist") {
                 let full = sourceDir + "/" + file
+                // V0.12: only regular files, never through a symlink — as root
+                // a link could read any file into a world-readable snapshot
+                // (review 2026-09-27).
+                var info = stat()
+                guard lstat(full, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+                    notes.append("not a regular file, skipped: \(full)")
+                    continue
+                }
                 guard let data = try? Data(contentsOf: URL(fileURLWithPath: full)) else {
                     notes.append("unreadable, skipped: \(full)")
                     continue

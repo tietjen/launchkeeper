@@ -100,29 +100,48 @@ final class CleanupLeftoverTests: XCTestCase {
                       "a StartupItem moves and returns as a whole folder")
     }
 
-    func testSystemFilesGoToTheRootOwnedQuarantineWithAManifestWrittenThroughSudo() throws {
-        // V0.12 (review 2026-09-27): root never keeps its entries in the user's
-        // home. A system file lands in the system store; its manifest is
-        // written through sudo (cp), so it is root-owned on a real Mac.
+    func testTheCLIWritesOnlyItsOwnStoreButSeesTheHelpersEntries() throws {
+        // V0.12 (reviews 2026-09-27): the root-owned tree has one writer, the
+        // helper. The CLI quarantines into the user's store and only reads
+        // (lists, locates, restores) the helper's entries.
         let fake = FakeInstaller(root: root)
         write("/Library/PrivilegedHelperTools/com.vendor.helper", "bin")
-        let split = CleanupEngine(environment: CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root), home: home,
-                                                                  quarantineRoot: home + "/quarantine",
-                                                                  systemQuarantineRoot: root + "/Library/Application Support/launchkeeper/quarantine"),
-                                  audit: AuditLog(directory: home + "/logs"))
-        let moved = split.quarantineItem(item(.privilegedHelper, "/Library/PrivilegedHelperTools/com.vendor.helper"), apply: true)
+        let systemRoot = root + "/Library/Application Support/launchkeeper/quarantine"
+        let cli = CleanupEngine(environment: CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root), home: home,
+                                                                quarantineRoot: home + "/quarantine",
+                                                                systemQuarantineRoot: systemRoot),
+                                audit: AuditLog(directory: home + "/logs"))
+        let moved = cli.quarantineItem(item(.privilegedHelper, "/Library/PrivilegedHelperTools/com.vendor.helper"), apply: true)
         XCTAssertEqual(moved.status, .appliedOk, "\(moved.messages)")
         let name = try XCTUnwrap(moved.quarantine)
-        XCTAssertNotNil(split.systemStore.load(name), "the entry is in the root-owned store")
-        XCTAssertNil(split.store.load(name), "nothing in the user's quarantine")
-        XCTAssertTrue(fake.mutations.contains { $0.hasPrefix("/usr/bin/sudo /bin/cp -- ") && $0.hasSuffix("/manifest.json") },
-                      "manifest written as root: \(fake.mutations)")
-        XCTAssertEqual(split.listAll().map(\.name), [name])
-        XCTAssertTrue(split.locate(name)?.root == split.systemStore.root)
+        XCTAssertNotNil(cli.store.load(name), "the CLI's entry is in the user's store")
+        XCTAssertNil(cli.systemStore.load(name), "the CLI never writes the helper's tree")
 
-        let back = split.restore(name: name, apply: true)
-        XCTAssertEqual(back.status, .appliedOk, "\(back.messages)")
-        XCTAssertEqual(split.systemStore.load(name)?.status, "restored", "the status update went through sudo too")
+        // An entry the helper made (here: written directly into its store) is listed and found.
+        let helper = CleanupEngine(environment: CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root), home: home,
+                                                                   quarantineRoot: systemRoot),
+                                   audit: AuditLog(directory: home + "/logs"))
+        write("/Library/PrivilegedHelperTools/com.vendor.other", "bin")
+        let byHelper = helper.quarantineItem(item(.privilegedHelper, "/Library/PrivilegedHelperTools/com.vendor.other"), apply: true)
+        let helperName = try XCTUnwrap(byHelper.quarantine)
+        XCTAssertEqual(Set(cli.listAll().map(\.name)), [name, helperName])
+        XCTAssertEqual(cli.locate(helperName)?.root, systemRoot)
+        XCTAssertEqual(cli.restore(name: helperName, apply: true).status, .appliedOk, "the CLI restores it (sudo mv)")
+    }
+
+    func testSnapshotsNeverFollowSymlinks() throws {
+        // Review 2026-09-27 (B4): as root, a link in a launch dir could copy any
+        // file into a world-readable snapshot.
+        let dir = home + "/LaunchAgents"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir + "/real.plist", contents: Data("<plist/>".utf8))
+        FileManager.default.createFile(atPath: home + "/secret", contents: Data("hash".utf8))
+        try FileManager.default.createSymbolicLink(atPath: dir + "/evil.plist", withDestinationPath: home + "/secret")
+        let env = BackupEnvironment(launchDirs: [dir], systemDirPrefixes: [], backupsRoot: home + "/backups",
+                                    runner: FakeLaunchd(), home: home, uid: 501)
+        guard case .success(let report) = BackupService(env: env).create(label: "t") else { return XCTFail("snapshot") }
+        XCTAssertEqual(report.copied, 1, "only the regular file")
+        XCTAssertTrue(report.notes.contains { $0.contains("evil.plist") }, "\(report.notes)")
     }
 
     func testPathsFileWithOneLiveEntryIsNotALeftover() {

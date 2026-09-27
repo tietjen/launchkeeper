@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.12.0] — 2026-09-27
+
+### Security
+- **Root keeps its bookkeeping out of the user's home.** Found by
+  independent reviews of the LaunchKeeper app's privileged helper: root
+  worked with paths inside `~/Library/Application Support/launchkeeper`,
+  where any process of the user can rename directories or plant symlinks
+  between root's check and root's write — enough to redirect a chown, a
+  restore or a snapshot onto system files. The kit now knows a root-owned
+  tree, `/Library/Application Support/launchkeeper/{quarantine,backups,
+  config-snapshots}`, written only by the privileged helper; the CLI keeps
+  writing into the user's own quarantine and only reads the helper's tree
+  (`quarantine list`, `restore`, `purge` see both; `restore` finds the
+  helper's snapshots too).
+- Launch-dir snapshots never follow symlinks and copy regular files only —
+  as root, a link could otherwise read any file into a world-readable
+  snapshot.
+
+### Changed
+- `CleanupEnvironment`/`RemediationEnvironment.systemQuarantineRoot`,
+  `CleanupEngine.systemStore`, `locate(_:)`, `listAll()`.
+
+2 new tests (351 total).
+
 ## [0.11.1] — 2026-09-27
 
 Findings of an independent review (Fable) of the 0.11 batches.

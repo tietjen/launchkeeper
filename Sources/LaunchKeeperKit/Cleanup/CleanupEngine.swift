@@ -9,11 +9,12 @@ public struct CleanupEnvironment {
     public var runner: CommandRunner
     public var disk: DiskView
     public var home: String
-    /// The user's quarantine: entries whose moves need no root.
+    /// Where this process writes quarantine entries: the user's quarantine
+    /// (CLI, app) or the root-owned tree (the privileged helper).
     public var quarantineRoot: String
-    /// V0.12: the root-owned quarantine for entries whose moves need root
-    /// (`LaunchKeeperPaths.systemQuarantine`). Defaults to `quarantineRoot`
-    /// when that was set explicitly (tests keep one hermetic store).
+    /// V0.12: the privileged helper's root-owned quarantine — only READ by
+    /// other processes (listing, restore planning). Defaults to
+    /// `quarantineRoot` when that was set explicitly (tests: one store).
     public var systemQuarantineRoot: String
     /// Logical directory of the receipts database.
     public var receiptsDirectory: String
@@ -72,13 +73,14 @@ public struct CleanupEngine {
         QuarantineStore(root: environment.quarantineRoot, fileManager: environment.disk.fileManager)
     }
 
-    /// V0.12: the root-owned quarantine (see `CleanupEnvironment.systemQuarantineRoot`).
+    /// V0.12: the privileged helper's root-owned quarantine — READ here
+    /// (list, locate, restore planning), written only by the helper (root),
+    /// whose `quarantineRoot` is that tree. The CLI writes only into the
+    /// user's quarantine: a second writer would make "root-owned" no proof
+    /// of "written by the helper" (review 2026-09-27).
     public var systemStore: QuarantineStore {
         QuarantineStore(root: environment.systemQuarantineRoot, fileManager: environment.disk.fileManager)
     }
-
-    /// The store an entry belongs in: root-owned when any of its moves needs root.
-    func store(needsRoot: Bool) -> QuarantineStore { needsRoot ? systemStore : store }
 
     /// The store that holds an existing entry — the root-owned one first.
     public func locate(_ name: String) -> QuarantineStore? {
@@ -93,38 +95,6 @@ public struct CleanupEngine {
         return (system + store.list()).sorted { $0.name > $1.name }
     }
 
-    /// Whether this process writes into `target` only through sudo: the
-    /// root-owned store, and we are not root (the CLI). The privileged
-    /// helper runs as root and writes directly.
-    func needsSudoToWrite(_ target: QuarantineStore) -> Bool {
-        target.root != store.root && geteuid() != 0
-    }
-
-    /// Writes a manifest — through sudo into the root-owned store when this
-    /// process is not root, so root-owned entries stay root-owned.
-    func save(_ manifest: QuarantineManifest, in target: QuarantineStore) -> ControlRefusal? {
-        guard needsSudoToWrite(target) else { return target.write(manifest) }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(manifest) else { return ControlRefusal("cannot encode the manifest") }
-        let staged = FileManager.default.temporaryDirectory.appendingPathComponent("launchkeeper-manifest-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: staged) }
-        guard FileManager.default.createFile(atPath: staged.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            return ControlRefusal("cannot stage the manifest")
-        }
-        let destination = target.directory(manifest.name) + "/manifest.json"
-        let (_, failure) = run([
-            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mkdir", "-p", "--", target.directory(manifest.name)],
-                           description: "quarantine entry (root-owned)"),
-            PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/cp", "--", staged.path, destination],
-                           description: "manifest (root-owned)"),
-        ], timeout: environment.interactiveTimeout)
-        if let failure { return ControlRefusal("cannot write the manifest: \(failure)") }
-        guard environment.disk.fileManager.contents(atPath: destination) == data else {
-            return ControlRefusal("quarantine manifest does not read back intact")
-        }
-        return nil
-    }
 
     /// Arguments per `mv` — far below ARG_MAX even with long bundle paths.
     static let batchSize = 200
@@ -224,8 +194,6 @@ public struct CleanupEngine {
                           analysis: analysis)
         }
 
-        // Uninstalls always need root: the entry lives in the root-owned store (V0.12).
-        let store = systemStore
         // The plan uses the quarantine name it WILL have; dry-run shows it.
         let name = store.makeName(kind: "uninstall", subject: id)
         let plan = uninstallPlan(analysis: analysis, quarantine: name)
@@ -245,17 +213,17 @@ public struct CleanupEngine {
                                kind: analysis.paths.first(where: { $0.path == root })?.kind.rawValue ?? "other")
             },
             receiptCopies: [], forgot: false, status: "planned", notes: messages)
-        if let failure = save(manifest, in: store) {
+        if let failure = store.write(manifest) {
             return finish(.refused(failure.reason), ["refused: \(failure.reason) — nothing moved"])
         }
         if analysis.canForget {
             let receiptDir = store.directory(name) + "/receipt"
             do {
-                try makeDirectory(receiptDir, in: store)
+                try fm.createDirectory(atPath: receiptDir, withIntermediateDirectories: true)
                 for suffix in [".bom", ".plist"] {
                     let source = environment.disk.disk(environment.receiptsDirectory + "/" + id + suffix)
                     let copy = receiptDir + "/" + id + suffix
-                    try copyFile(source, to: copy, in: store)
+                    try fm.copyItem(atPath: source, toPath: copy)
                     guard fm.contents(atPath: copy) == fm.contents(atPath: source) else {
                         throw ControlRefusal("receipt copy differs")
                     }
@@ -266,7 +234,7 @@ public struct CleanupEngine {
                               ["refused: could not copy the receipt into the quarantine (\(error)) — nothing moved"],
                               quarantine: name)
             }
-            _ = save(manifest, in: store)
+            _ = store.write(manifest)
         }
         audit.append(operation: "quarantine", target: name, status: "created")
 
@@ -285,7 +253,7 @@ public struct CleanupEngine {
         let undo = "launchkeeper quarantine restore \(name)"
         if problems.isEmpty {
             manifest.status = "applied-ok"
-            _ = save(manifest, in: store)
+            _ = store.write(manifest)
             messages.append("verified: \(manifest.moves.count) path(s) in the quarantine, gone from their place"
                 + (manifest.forgot ? "; receipt forgotten (copy kept)" : ""))
             return finish(.appliedOk, messages, plan: plan, executed: executed, analysis: analysis,
@@ -293,7 +261,7 @@ public struct CleanupEngine {
         }
         manifest.status = "applied-fail(\(problems.count))"
         manifest.notes += problems
-        _ = save(manifest, in: store)
+        _ = store.write(manifest)
         return finish(.appliedFailed(problems.first!), messages + problems, plan: plan, executed: executed,
                       analysis: analysis, quarantine: name, undo: undo)
     }
@@ -392,8 +360,6 @@ public struct CleanupEngine {
             }
         }
 
-        // V0.12: what needs root is quarantined into the root-owned store.
-        let store = self.store(needsRoot: !path.hasPrefix(environment.home + "/"))
         let name = store.makeName(kind: "remove", subject: (path as NSString).lastPathComponent)
         let parent = (path as NSString).deletingLastPathComponent
         let destination = store.quarantinedPath(name, original: parent)
@@ -420,7 +386,7 @@ public struct CleanupEngine {
             moves: [QuarantineMove(original: path, quarantined: store.quarantinedPath(name, original: path),
                                    kind: item.type.rawValue)],
             receiptCopies: [], forgot: false, status: "planned", notes: [item.key] + item.orphanReasons)
-        if let failure = save(manifest, in: store) {
+        if let failure = store.write(manifest) {
             return result(.refused(failure.reason), ["refused: \(failure.reason) — nothing moved"])
         }
         audit.append(operation: "quarantine", target: name, status: "created")
@@ -432,7 +398,7 @@ public struct CleanupEngine {
         }
         let undo = "launchkeeper quarantine restore \(name)"
         manifest.status = problems.isEmpty ? "applied-ok" : "applied-fail(\(problems.count))"
-        _ = save(manifest, in: store)
+        _ = store.write(manifest)
         guard problems.isEmpty else {
             return result(.appliedFailed(problems[0]), messages + problems, plan: plan, executed: executed,
                           quarantine: name, undo: undo)
@@ -487,7 +453,6 @@ public struct CleanupEngine {
                             "was an app: " + candidate.appEvidence.joined(separator: ", ")]
             let total = paths.reduce(UInt64(0)) { $0 + $1.bytes }
             messages.append("\(paths.count) path(s), \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))")
-            let store = self.store(needsRoot: paths.contains(where: \.needsRoot))
             let name = store.makeName(kind: "leftovers", subject: id)
             var plan: [PlannedCommand] = []
             for path in paths {
@@ -516,7 +481,7 @@ public struct CleanupEngine {
                                                   quarantined: store.quarantinedPath(name, original: $0.path),
                                                   kind: $0.kind) },
                 receiptCopies: [], forgot: false, status: "planned", notes: [id] + proofs)
-            if let failure = save(manifest, in: store) {
+            if let failure = store.write(manifest) {
                 return finish(.refused(failure.reason), ["refused: \(failure.reason) — nothing moved"])
             }
             audit.append(operation: "quarantine", target: name, status: "created")
@@ -530,7 +495,7 @@ public struct CleanupEngine {
             }
             let undo = "launchkeeper quarantine restore \(name)"
             manifest.status = problems.isEmpty ? "applied-ok" : "applied-fail(\(problems.count))"
-            _ = save(manifest, in: store)
+            _ = store.write(manifest)
             guard problems.isEmpty else {
                 return finish(.appliedFailed(problems[0]), messages + problems
                               + ["containers of other apps may need App Data / Full Disk Access for your terminal"],
@@ -618,13 +583,13 @@ public struct CleanupEngine {
         if problems.isEmpty {
             manifest.status = "restored"
             if receiptBack { manifest.forgot = false }
-            _ = save(manifest, in: store)
+            _ = store.write(manifest)
             return finish(.appliedOk, messages + ["verified: \(restoring.count) path(s) back in place"
                                                   + (receiptBack ? ", receipt known again" : "")],
                           plan: plan, executed: executed)
         }
         manifest.status = "restore-fail(\(problems.count))"
-        _ = save(manifest, in: store)
+        _ = store.write(manifest)
         return finish(.appliedFailed(problems.first!), messages + problems, plan: plan, executed: executed)
     }
 
@@ -669,30 +634,6 @@ public struct CleanupEngine {
             return finish(.appliedFailed("quarantine entry still exists"), messages, plan: plan, executed: executed)
         }
         return finish(.appliedOk, messages + ["verified: \(directory) is gone"], plan: plan, executed: executed)
-    }
-
-    /// Creates a directory inside an entry — through sudo in the root-owned store (CLI).
-    func makeDirectory(_ path: String, in target: QuarantineStore) throws {
-        guard needsSudoToWrite(target) else {
-            try environment.disk.fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
-            return
-        }
-        let (_, failure) = run([PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/mkdir", "-p", "--", path],
-                                               description: "directory in the quarantine entry")],
-                               timeout: environment.interactiveTimeout)
-        if let failure { throw ControlRefusal(failure) }
-    }
-
-    /// Copies a file into an entry — through sudo in the root-owned store (CLI).
-    func copyFile(_ source: String, to destination: String, in target: QuarantineStore) throws {
-        guard needsSudoToWrite(target) else {
-            try environment.disk.fileManager.copyItem(atPath: source, toPath: destination)
-            return
-        }
-        let (_, failure) = run([PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/cp", "-p", "--", source, destination],
-                                               description: "copy into the quarantine entry")],
-                               timeout: environment.interactiveTimeout)
-        if let failure { throw ControlRefusal(failure) }
     }
 
     // MARK: - execution
