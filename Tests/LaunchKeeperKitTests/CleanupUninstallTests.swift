@@ -261,6 +261,19 @@ final class CleanupUninstallTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: home + "/quarantine"))
     }
 
+    func testForbiddenPrefixesStopTheWholeUninstall() throws {
+        // Review 2026-09-27 (C-2): the helper never moves out of user-writable places.
+        let fake = FakeInstaller(root: root)
+        toolPackage(fake)
+        var guarded = engine(fake)
+        guarded.environment.forbiddenMovePrefixes = ["/usr/local/"]   // stands in for /Users/ in this fixture
+        let result = guarded.uninstall(packageIdentifier: "com.vendor.tool", apply: true)
+        guard case .refused(let reason) = result.status else { return XCTFail("\(result.status)") }
+        XCTAssertTrue(reason.contains("user-writable"), reason)
+        XCTAssertTrue(fake.mutations.isEmpty, "nothing moved, nothing forgotten")
+        XCTAssertTrue(CleanupEnvironment.userWritablePrefixes.contains("/Users/"))
+    }
+
     func testApplyMovesIntoQuarantineAndRestorePutsEverythingBack() throws {
         let fake = FakeInstaller(root: root)
         toolPackage(fake)

@@ -29,6 +29,12 @@ public struct RemediationEnvironment {
     /// V0.12: the root-owned quarantine for moves that need root (see
     /// `CleanupEnvironment.systemQuarantineRoot`).
     public var systemQuarantineRoot: String
+    /// V0.12.1: refuse everything that belongs to one user — the setting of
+    /// a caller running as root for someone else (the privileged helper).
+    /// Root has no business in a user's domain: `launchctl` for gui/<uid>,
+    /// the user's crontab or loginwindow plist, per-user pluginkit
+    /// elections, paths in the home (review 2026-09-27, C-1).
+    public var systemScopeOnly = false
     public var disk: DiskView
 
     public init(runner: CommandRunner = SystemCommandRunner(),
@@ -385,6 +391,10 @@ public struct RemediationEngine {
             return finish(.refused("ambiguous: \(needle)"), target: needle,
                           messages: ["ambiguous '\(needle)' (\(candidates.count) matches):"] + candidates)
         case .unique(let item):
+            if environment.systemScopeOnly, let reason = Self.userScopeReason(item, home: environment.home) {
+                return finish(.refused(reason), target: item.label ?? item.key,
+                              messages: ["refused: \(reason)", "the app changes the user's own entries itself — no administrator rights needed"])
+            }
             var target = RemediationPlanner.displayTarget(for: item, uid: environment.uid)
             // A deletion audit line must say WHICH file — target carries the path.
             if operation == .remove, let path = item.path { target += " \(path)" }
@@ -556,6 +566,23 @@ public struct RemediationEngine {
             progress(index, result)
         }
         return results
+    }
+
+    /// Why an entry belongs to one user (and is none of root's business), or `nil`.
+    /// - Parameters:
+    ///   - item: The resolved entry.
+    ///   - home: The user's home.
+    public static func userScopeReason(_ item: BackgroundItem, home: String) -> String? {
+        let homePrefix = (home.hasSuffix("/") ? String(home.dropLast()) : home) + "/"
+        if item.domain == .user { return "user-domain entry — not changed with administrator rights" }
+        switch item.controlMechanism {
+        case .pluginkit: return "app extension elections are per user — not changed with administrator rights"
+        default: break   // a user's crontab is a user-domain entry (above)
+        }
+        for path in [item.path, item.executable].compactMap({ $0 }) where path.hasPrefix(homePrefix) {
+            return "lives in the user's home (\(path)) — root does not write there"
+        }
+        return nil
     }
 
     /// A config-source plan, ready to show (dry-run) or run (--apply).

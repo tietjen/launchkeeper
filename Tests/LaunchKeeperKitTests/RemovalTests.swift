@@ -610,6 +610,25 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertTrue(second.backupName.hasPrefix(first.backupName), "\(second.backupName)")
     }
 
+    func testSystemScopeOnlyRefusesTheUsersOwnEntries() throws {
+        // Review 2026-09-27 (C-1): root (the helper) has no business in a user's domain.
+        let setup = try makeSetup(entries: [("com.example.calm", calmArgs)], services: ["com.example.calm": 555])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        var engine = setup.engine
+        engine.environment.systemScopeOnly = true
+        let result = engine.run(operation: .disable, target: "com.example.calm", apply: true, scanOptions: userOnly)
+        guard case .refused(let reason) = result.status else { return XCTFail("\(result.status)") }
+        XCTAssertTrue(reason.contains("user-domain"), reason)
+        XCTAssertTrue(setup.runner.launchd.disabled.isEmpty, "nothing changed")
+
+        let system = BackgroundItem(key: "d", displayName: "d", type: .launchDaemon, path: "/Library/LaunchDaemons/d.plist",
+                                    label: "d", domain: .system)
+        XCTAssertNil(RemediationEngine.userScopeReason(system, home: "/Users/alice"))
+        var inHome = system
+        inHome.executable = "/Users/alice/bin/tool"
+        XCTAssertNotNil(RemediationEngine.userScopeReason(inHome, home: "/Users/alice"))
+    }
+
     func testBatchStopsBetweenEntries() throws {
         let setup = try makeSetup(entries: [("com.example.calm", calmArgs), ("com.example.quiet", calmArgs)])
         defer { try? FileManager.default.removeItem(atPath: setup.root) }

@@ -21,6 +21,15 @@ public struct CleanupEnvironment {
     public var interactiveTimeout: TimeInterval
     /// `purge` of a big tree can take a while.
     public var purgeTimeout: TimeInterval
+    /// V0.12.1: prefixes `uninstall` never moves from. Root moving files out
+    /// of a directory a user can write (homes, /Users/Shared, temp dirs) is a
+    /// rename/symlink race; the privileged helper sets
+    /// `CleanupEnvironment.userWritablePrefixes` (review 2026-09-27, C-2).
+    public var forbiddenMovePrefixes: [String] = []
+
+    /// Directories other users (or everyone) can write into.
+    public static let userWritablePrefixes = ["/Users/", "/tmp/", "/private/tmp/", "/var/tmp/", "/private/var/tmp/",
+                                              "/Volumes/"]
 
     public init(runner: CommandRunner = SystemCommandRunner(), disk: DiskView = DiskView(),
                 home: String = NSHomeDirectory(), quarantineRoot: String? = nil,
@@ -187,6 +196,13 @@ public struct CleanupEngine {
             + rootNotes
         if !analysis.canForget {
             messages.append("receipt stays: " + analysis.forgetBlockers.joined(separator: "; "))
+        }
+        if let root = analysis.moveRoots.first(where: { path in
+            environment.forbiddenMovePrefixes.contains { path.hasPrefix($0) } }) {
+            return finish(.refused("package moves files from a user-writable place"),
+                          messages + ["refused: \(root) lies where users can write — root does not move files from "
+                                      + "there; uninstall this package in Terminal (launchkeeper uninstall)"],
+                          analysis: analysis)
         }
         guard !analysis.moveRoots.isEmpty || analysis.canForget else {
             return finish(.refused("nothing to uninstall"),
