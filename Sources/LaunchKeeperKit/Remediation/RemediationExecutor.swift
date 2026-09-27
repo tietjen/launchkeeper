@@ -70,6 +70,9 @@ public struct RemediationResult {
     public var plan: [PlannedCommand]
     public var executed: [String]
     public var undoHint: String?
+    /// V0.11: the resolved entry's stable key (batch results carry it, so a
+    /// caller can match results to its own list); nil when unresolved.
+    public var key: String? = nil
 
     public var auditStatus: String {
         switch status {
@@ -322,14 +325,27 @@ public struct RemediationEngine {
     public func run(operation: RemediationOperation, target needle: String,
                     apply: Bool, now: Bool = false, allowWorking: Bool = false,
                     scanOptions: ScanOptions = RemediationEngine.defaultScanOptions) -> RemediationResult {
-        // Remediation READS the scan (target resolution needs live loaded/enabled
-        // state and the full id space) but never extends it.
+        run(operation: operation, target: needle, apply: apply, now: now, allowWorking: allowWorking,
+            in: scan(options: scanOptions))
+    }
+
+    /// The inventory remediation resolves against (V0.11: public, so a batch
+    /// scans once). Remediation READS the scan — target resolution needs live
+    /// loaded/enabled state and the full id space — but never extends it.
+    public func scan(options: ScanOptions = RemediationEngine.defaultScanOptions) -> ScanReport {
         let scanEnv = ScanEnvironment(runner: environment.runner,
                                       fileManager: environment.fileManager,
                                       home: environment.home, uid: environment.uid,
                                       legacyScanner: environment.legacyScanner,
                                       btmCache: environment.btmCache)
-        let report = ScanCoordinator(environment: scanEnv).perform(options: scanOptions)
+        return ScanCoordinator(environment: scanEnv).perform(options: options)
+    }
+
+    /// One remediation against a scan the caller already holds (V0.11).
+    /// Same gate, plan, audit and verification as `run(operation:target:…)`.
+    public func run(operation: RemediationOperation, target needle: String,
+                    apply: Bool, now: Bool = false, allowWorking: Bool = false,
+                    in report: ScanReport) -> RemediationResult {
 
         func finish(_ status: RemediationStatus, target: String, messages: [String],
                     plan: [PlannedCommand] = [], executed: [String] = [],
@@ -482,6 +498,55 @@ public struct RemediationEngine {
                               plan: plan, executed: outcome.executed, undo: undoText)
             }
         }
+    }
+
+    /// Many remediations against ONE scan (V0.11) — the batch the app's
+    /// queue and `disable a b c` use instead of a scan per entry.
+    ///
+    /// Every request goes through the same gate, plan, audit and per-entry
+    /// verification as a single run; only the scan is shared. That is sound
+    /// because each action changes its own entry only — and a batch never
+    /// touches one entry twice: a second request for an entry already in the
+    /// batch is refused. A failure does not stop the batch (TJ, 2026-09-27);
+    /// `shouldContinue` stops it between entries.
+    /// - Parameters:
+    ///   - requests: What to do, in order.
+    ///   - apply: `false` plans everything (dry-run), `true` executes.
+    ///   - scanOptions: The shared scan.
+    ///   - shouldContinue: Asked before each entry; `false` stops the batch
+    ///     (the rest is reported as not run).
+    ///   - progress: Called after each entry with its index and result.
+    /// - Returns: One result per request, in order.
+    public func runBatch(_ requests: [RemediationRequest], apply: Bool,
+                         scanOptions: ScanOptions = RemediationEngine.defaultScanOptions,
+                         shouldContinue: () -> Bool = { true },
+                         progress: (Int, RemediationResult) -> Void = { _, _ in }) -> [RemediationResult] {
+        let report = scan(options: scanOptions)
+        var seen = Set<String>()
+        var results: [RemediationResult] = []
+        for (index, request) in requests.enumerated() {
+            var result: RemediationResult
+            let key: String?
+            if case .unique(let item) = TargetResolver.resolve(request.target, in: report.items) { key = item.key } else { key = nil }
+            if !shouldContinue() {
+                result = RemediationResult(operation: request.operation, target: request.target,
+                                           status: .refused("stopped before this entry"),
+                                           messages: ["the batch was stopped — nothing ran for this entry"],
+                                           plan: [], executed: [], undoHint: nil)
+            } else if let key, !seen.insert(key).inserted {
+                result = RemediationResult(operation: request.operation, target: request.target,
+                                           status: .refused("entry already in this batch"),
+                                           messages: ["one action per entry and batch — the scan would be stale for a second one"],
+                                           plan: [], executed: [], undoHint: nil)
+            } else {
+                result = run(operation: request.operation, target: request.target, apply: apply,
+                             now: request.now, allowWorking: request.allowWorking, in: report)
+            }
+            result.key = key
+            results.append(result)
+            progress(index, result)
+        }
+        return results
     }
 
     /// A config-source plan, ready to show (dry-run) or run (--apply).

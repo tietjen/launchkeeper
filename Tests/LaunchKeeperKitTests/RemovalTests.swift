@@ -549,6 +549,42 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertTrue(setup.engine.audit.readAll().contains("refused(not orphaned"))
     }
 
+    // MARK: V0.11 batch
+
+    func testBatchDisablesSeveralEntriesAgainstOneScan() throws {
+        let setup = try makeSetup(entries: [("com.example.calm", calmArgs), ("com.example.quiet", calmArgs)],
+                                  services: ["com.example.calm": 555, "com.example.quiet": 556])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        var seen: [Int] = []
+        let results = setup.engine.runBatch([
+            RemediationRequest(operation: .disable, target: "com.example.calm"),
+            RemediationRequest(operation: .disable, target: "com.example.quiet"),
+            RemediationRequest(operation: .enable, target: "com.example.calm"),   // same entry again
+            RemediationRequest(operation: .disable, target: "com.example.nothere"),
+        ], apply: true, scanOptions: userOnly, progress: { index, _ in seen.append(index) })
+
+        XCTAssertEqual(seen, [0, 1, 2, 3], "progress after every entry, in order")
+        XCTAssertEqual(results.map(\.key), ["com.example.calm", "com.example.quiet", "com.example.calm", nil])
+        XCTAssertEqual(results[0].status, .appliedOk, "\(results[0].messages)")
+        XCTAssertEqual(results[1].status, .appliedOk, "a failure elsewhere does not stop the batch")
+        XCTAssertEqual(results[2].status, .refused("entry already in this batch"))
+        guard case .refused = results[3].status else { return XCTFail("unknown target must be refused") }
+        XCTAssertEqual(setup.runner.launchd.disabled, ["com.example.calm", "com.example.quiet"])
+    }
+
+    func testBatchStopsBetweenEntries() throws {
+        let setup = try makeSetup(entries: [("com.example.calm", calmArgs), ("com.example.quiet", calmArgs)])
+        defer { try? FileManager.default.removeItem(atPath: setup.root) }
+        var asked = 0
+        let results = setup.engine.runBatch([
+            RemediationRequest(operation: .disable, target: "com.example.calm"),
+            RemediationRequest(operation: .disable, target: "com.example.quiet"),
+        ], apply: true, scanOptions: userOnly, shouldContinue: { asked += 1; return asked == 1 })
+        XCTAssertEqual(results[0].status, .appliedOk)
+        XCTAssertEqual(results[1].status, .refused("stopped before this entry"))
+        XCTAssertEqual(setup.runner.launchd.disabled, ["com.example.calm"], "nothing ran after the stop")
+    }
+
     func testWorkingRemovalPlansDisableThenQuarantineWithoutSudo() throws {
         let setup = try makeSetup(entries: [("com.example.calm", calmArgs)],
                                   services: ["com.example.calm": 555])

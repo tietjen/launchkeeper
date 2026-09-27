@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.11.0] — 2026-09-27
+
+### Added
+- Batches: `disable`, `enable` and `remove` take several targets
+  (`launchkeeper disable a b c [--apply]`) and run them against ONE scan —
+  the scan (with a cold Background Task Management dump up to a minute) used
+  to run once per target. Every entry still goes through its own gate, plan,
+  audit line and verification; results print as they come, a summary line
+  follows, and `--json` prints an array. A failure does not stop the batch;
+  the same entry twice in one batch is refused (the shared scan would be
+  stale for the second action).
+- Kit: `RemediationEngine.runBatch(_:apply:…)` with `RemediationRequest`,
+  progress callback and a stop check between entries; `scan(options:)` and
+  `run(…, in: report)` for callers that hold a scan; results carry the
+  resolved `key`. Used by the app's queue.
+
+2 new tests (347 total).
+
 ## [0.10.2] — 2026-09-26
 
 ### Fixed

@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.10.2)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.11.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -269,6 +269,7 @@ launchkeeper remove <id|name> --apply  # execute — but only after the pre-dele
                                # a job launchd still holds from a plist that is
                                # already gone is REFUSED here — the refusal names
                                # the working command (launchkeeper disable … --apply)
+launchkeeper disable <a> <b> <c> [--apply]  # V0.11: several targets = one batch, one scan
 launchkeeper remove <id|name> --working [--apply]  # V0.10: a WORKING plist — disable
                                # (override + unload), then move the plist into
                                # the quarantine; never deleted, the override stays

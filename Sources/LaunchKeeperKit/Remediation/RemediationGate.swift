@@ -4,8 +4,23 @@ import Foundation
 /// read-only scan pipeline (ScanCoordinator stays write-free by design).
 /// Rule from the spec: inventory and destructive operations never share a path.
 
-public enum RemediationOperation: String, Codable {
+public enum RemediationOperation: String, Codable, Sendable {
     case disable, enable, backup, restore, remove
+}
+
+/// One entry of a remediation batch (V0.11).
+public struct RemediationRequest: Codable, Equatable, Sendable {
+    public var operation: RemediationOperation
+    /// Stable key (preferred), label, name fragment or display id — as for a single run.
+    public var target: String
+    /// `enable --now`: reload immediately.
+    public var now: Bool
+    /// `remove --working`: quarantine a working launch plist.
+    public var allowWorking: Bool
+
+    public init(operation: RemediationOperation, target: String, now: Bool = false, allowWorking: Bool = false) {
+        self.operation = operation; self.target = target; self.now = now; self.allowWorking = allowWorking
+    }
 }
 
 public enum GateDecision: Equatable {

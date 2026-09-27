@@ -849,10 +849,27 @@ private func printCleanup(_ result: CleanupResult, engine: CleanupEngine, list: 
 
 /// Engine-backed display + JSON for disable/enable. All decisions already
 /// happened in LaunchKeeperKit (gate/plan/executor); this only renders and audits.
-private func performRemediation(operation: RemediationOperation, target: String,
+private func performRemediation(operation: RemediationOperation, targets: [String],
                                 apply: Bool, now: Bool, json: Bool, allowWorking: Bool = false) throws {
     let engine = RemediationEngine()
-    let result = engine.run(operation: operation, target: target, apply: apply, now: now, allowWorking: allowWorking)
+    let results: [RemediationResult]
+    if targets.count == 1 {
+        results = [engine.run(operation: operation, target: targets[0], apply: apply, now: now,
+                              allowWorking: allowWorking)]
+        if !json { printRemediation(results[0]) }
+    } else {
+        // V0.11: one scan for all targets; results print as they come, so a
+        // long batch shows its progress (and sudo prompts land in context).
+        let requests = targets.map { RemediationRequest(operation: operation, target: $0, now: now,
+                                                        allowWorking: allowWorking) }
+        results = engine.runBatch(requests, apply: apply, progress: { index, result in
+            guard !json else { return }
+            print("== [\(index + 1)/\(targets.count)] \(operation.rawValue) \(targets[index])")
+            printRemediation(result)
+            print("")
+            fflush(stdout)
+        })
+    }
 
     if json {
         struct RemediationJSON: Codable {
@@ -865,50 +882,61 @@ private func performRemediation(operation: RemediationOperation, target: String,
             var undo: String?
             var auditPath: String
         }
-        print(try JSONRenderer.encode(RemediationJSON(
-            operation: operation.rawValue, target: result.target,
-            status: result.auditStatus, applied: result.executed,
-            planned: result.plan.map { $0.display }, notes: result.messages,
-            undo: result.undoHint, auditPath: engine.audit.url.path)))
+        let rows = results.map { result in
+            RemediationJSON(operation: operation.rawValue, target: result.target,
+                            status: result.auditStatus, applied: result.executed,
+                            planned: result.plan.map { $0.display }, notes: result.messages,
+                            undo: result.undoHint, auditPath: engine.audit.url.path)
+        }
+        // One target keeps the pre-V0.11 shape (an object); several print an array.
+        if rows.count == 1 { print(try JSONRenderer.encode(rows[0])) } else { print(try JSONRenderer.encode(rows)) }
     } else {
-        switch result.status {
-        case .planned:
-            print("DRY-RUN — nothing executed (dry-run is the default).")
-            print("plan:")
-            for (index, command) in result.plan.enumerated() {
-                print("  \(index + 1). \(command.display)")
-                print("      \(command.description)")
-            }
-            for line in result.messages where !line.hasPrefix("dry-run: nothing executed") {
-                print("  \(line)")
-            }
-            if let undo = result.undoHint {
-                print("\nundo later with: \(undo)")
-            }
-            print("execute for real with: --apply")
-        case .appliedOk:
-            print("applied (\(result.executed.count) command(s)), verified after execution:")
-            for line in result.executed { print("  ok  \(line)") }
-            if let undo = result.undoHint {
-                print("undo with: \(undo)")
-            }
-        case .appliedFailed(let detail):
-            print("FAILED (\(detail)) after \(result.executed.count) command(s):")
-            for line in result.executed { print("  \(line)") }
-            for line in result.messages { print("  \(line)") }
-            print("partial state — inspect with: launchkeeper inspect <id>")
-        case .refused(let reason):
-            print("REFUSED — \(reason)")
-            for line in result.messages where !line.hasPrefix("refused:") {
-                print("  \(line)")
-            }
+        if targets.count > 1 {
+            let ok = results.filter { if case .appliedOk = $0.status { return true }; if case .planned = $0.status { return true }; return false }.count
+            print("batch: \(ok) of \(results.count) \(apply ? "applied and verified" : "planned"), "
+                  + "\(results.count - ok) refused or failed")
         }
         print("audit: \(engine.audit.url.path)")
     }
 
+    if results.contains(where: { if case .appliedFailed = $0.status { return true }; if case .refused = $0.status { return true }; return false }) {
+        throw ExitCode(1)
+    }
+}
+
+/// Prints one remediation result (plan, verified steps, failure or refusal).
+private func printRemediation(_ result: RemediationResult) {
     switch result.status {
-    case .appliedFailed, .refused: throw ExitCode(1)
-    case .planned, .appliedOk: break
+    case .planned:
+        print("DRY-RUN — nothing executed (dry-run is the default).")
+        print("plan:")
+        for (index, command) in result.plan.enumerated() {
+            print("  \(index + 1). \(command.display)")
+            print("      \(command.description)")
+        }
+        for line in result.messages where !line.hasPrefix("dry-run: nothing executed") {
+            print("  \(line)")
+        }
+        if let undo = result.undoHint {
+            print("\nundo later with: \(undo)")
+        }
+        print("execute for real with: --apply")
+    case .appliedOk:
+        print("applied (\(result.executed.count) command(s)), verified after execution:")
+        for line in result.executed { print("  ok  \(line)") }
+        if let undo = result.undoHint {
+            print("undo with: \(undo)")
+        }
+    case .appliedFailed(let detail):
+        print("FAILED (\(detail)) after \(result.executed.count) command(s):")
+        for line in result.executed { print("  \(line)") }
+        for line in result.messages { print("  \(line)") }
+        print("partial state — inspect with: launchkeeper inspect <id>")
+    case .refused(let reason):
+        print("REFUSED — \(reason)")
+        for line in result.messages where !line.hasPrefix("refused:") {
+            print("  \(line)")
+        }
     }
 }
 
@@ -917,15 +945,15 @@ struct DisableCommand: ParsableCommand {
         commandName: "disable",
         abstract: "Disable one item — launchd override, extension election, crontab line, login hook or firewall rule (gated, reversible; dry-run by default).")
 
-    @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
-    var id: String
+    @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
+    var ids: [String]
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("json"), help: "machine-readable output")
     var json = false
 
     mutating func run() throws {
-        try performRemediation(operation: .disable, target: id, apply: apply, now: false, json: json)
+        try performRemediation(operation: .disable, targets: ids, apply: apply, now: false, json: json)
     }
 }
 
@@ -934,8 +962,8 @@ struct EnableCommand: ParsableCommand {
         commandName: "enable",
         abstract: "Undo a disable (dry-run by default). --now also reloads a launchd job.")
 
-    @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
-    var id: String
+    @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
+    var ids: [String]
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("now"), help: "bootstrap the job again after enabling")
@@ -944,7 +972,7 @@ struct EnableCommand: ParsableCommand {
     var json = false
 
     mutating func run() throws {
-        try performRemediation(operation: .enable, target: id, apply: apply, now: now, json: json)
+        try performRemediation(operation: .enable, targets: ids, apply: apply, now: now, json: json)
     }
 }
 
@@ -1077,8 +1105,8 @@ struct RemoveCommand: ParsableCommand {
         disable override stays, so a re-written plist cannot start.
         """)
 
-    @Argument(help: "display id, launchd label, name or key fragment — exactly one target")
-    var id: String
+    @Argument(help: "display id, launchd label, name or key fragment — one or more targets (V0.11: several run as one batch against a single scan)")
+    var ids: [String]
     @Flag(name: .customLong("apply"), help: "execute the plan instead of only showing it")
     var apply = false
     @Flag(name: .customLong("json"), help: "machine-readable output")
@@ -1088,7 +1116,7 @@ struct RemoveCommand: ParsableCommand {
     var working = false
 
     mutating func run() throws {
-        try performRemediation(operation: .remove, target: id, apply: apply, now: false, json: json,
+        try performRemediation(operation: .remove, targets: ids, apply: apply, now: false, json: json,
                                allowWorking: working)
     }
 }
@@ -1199,7 +1227,7 @@ struct LaunchKeeper: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "launchkeeper",
         abstract: """
-        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.10.2).
+        Background-service inventory + app correlation + gated remediation + cleanup + watch (V0.11.0).
 
         Dry-run is the default: disable/enable/remove/restore only show a plan
         unless --apply is given. `remove` deletes only an orphaned launch
@@ -1210,7 +1238,7 @@ struct LaunchKeeper: ParsableCommand {
         match a package's bill of materials into a quarantine — restorable;
         `quarantine purge` is the one real deletion.
         """,
-        version: "0.10.2",
+        version: "0.11.0",
         subcommands: [ListCommand.self, InspectCommand.self, DoctorCommand.self, ReceiptsCommand.self,
                       SnapshotCommand.self, DiffCommand.self,
                       BackgroundCommand.self,
