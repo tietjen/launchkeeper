@@ -585,9 +585,12 @@ final class RemovalEngineTests: XCTestCase {
         XCTAssertEqual(results.map(\.status), [.appliedOk, .appliedOk], "\(results.map(\.messages))")
         let snapshots = snapshotNames(setup).sorted()
         XCTAssertEqual(snapshots.count, 2, "one snapshot per removal: \(snapshots)")
+        XCTAssertNotEqual(results[0].undoHint, results[1].undoHint, "each removal names its own snapshot")
         // Each undo names its own snapshot, and that snapshot holds the removed file.
         for (result, label) in zip(results, ["de.launchkeeper.ghost.plist", "de.launchkeeper.ghost2.plist"]) {
-            let name = try XCTUnwrap(snapshots.first { result.undoHint?.contains($0) == true }, "\(result.undoHint ?? "")")
+            // Whole name with its separator: "…-pre-remove" is a prefix of "…-pre-remove-2".
+            let name = try XCTUnwrap(snapshots.first { result.undoHint?.contains("restore \($0) ") == true },
+                                     "\(result.undoHint ?? "")")
             let manifest = try String(contentsOfFile: setup.backupsRoot + "/" + name + "/manifest.json", encoding: .utf8)
             XCTAssertTrue(manifest.contains(label), "\(name) must contain \(label)")
         }
