@@ -142,6 +142,13 @@ final class CleanupLeftoverTests: XCTestCase {
         guard case .success(let report) = BackupService(env: env).create(label: "t") else { return XCTFail("snapshot") }
         XCTAssertEqual(report.copied, 1, "only the regular file")
         XCTAssertTrue(report.notes.contains { $0.contains("evil.plist") }, "\(report.notes)")
+
+        // Review 2026-09-27 (S-C): a copy is never wider than its original.
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dir + "/real.plist")
+        guard case .success(let second) = BackupService(env: env).create(label: "u") else { return XCTFail("snapshot") }
+        let copy = second.backupDir + "/files" + dir + "/real.plist"
+        let mode = try FileManager.default.attributesOfItem(atPath: copy)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
     }
 
     func testPathsFileWithOneLiveEntryIsNotALeftover() {

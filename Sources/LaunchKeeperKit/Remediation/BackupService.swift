@@ -179,6 +179,10 @@ public struct BackupService {
                     try fm.createDirectory(atPath: (staged as NSString).deletingLastPathComponent,
                                            withIntermediateDirectories: true)
                     try data.write(to: URL(fileURLWithPath: staged))
+                    // No wider than the original (review 2026-09-27): a 0600
+                    // daemon plist must not become world-readable in a snapshot.
+                    let copyMode = mode >= 0 ? (mode & 0o777 & ~0o022) : 0o600
+                    try fm.setAttributes([.posixPermissions: NSNumber(value: copyMode)], ofItemAtPath: staged)
                     entries.append(ManifestEntry(rel: rel, target: full, sha256: sha,
                                                  size: data.count, mode: mode, uid: ownerUid))
                 } catch {

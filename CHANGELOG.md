@@ -19,9 +19,11 @@ under the former name **btmctl**.
   writing into the user's own quarantine and only reads the helper's tree
   (`quarantine list`, `restore`, `purge` see both; `restore` finds the
   helper's snapshots too).
-- Launch-dir snapshots never follow symlinks and copy regular files only —
-  as root, a link could otherwise read any file into a world-readable
-  snapshot.
+- Launch-dir snapshots never follow symlinks, copy regular files only, and
+  a copy is never more readable than its original — as root, a link or a
+  0600 daemon plist could otherwise end up readable in a snapshot.
+- A CLI restore of a helper entry says when its status could not be
+  recorded (the helper's entries are read-only for the user) and how to.
 
 ### Changed
 - `CleanupEnvironment`/`RemediationEnvironment.systemQuarantineRoot`,

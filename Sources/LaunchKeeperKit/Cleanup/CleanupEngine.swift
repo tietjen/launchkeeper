@@ -583,7 +583,12 @@ public struct CleanupEngine {
         if problems.isEmpty {
             manifest.status = "restored"
             if receiptBack { manifest.forgot = false }
-            _ = store.write(manifest)
+            if let failure = store.write(manifest) {
+                // The helper's root-owned entries are read-only for the CLI: the
+                // files are back, only the entry's status could not be recorded.
+                messages.append("note: status not recorded (\(failure.reason)) — the entry still reads "
+                    + "\"\(manifest.name)\" as quarantined; `sudo launchkeeper quarantine restore \(name)` records it")
+            }
             return finish(.appliedOk, messages + ["verified: \(restoring.count) path(s) back in place"
                                                   + (receiptBack ? ", receipt known again" : "")],
                           plan: plan, executed: executed)
