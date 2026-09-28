@@ -82,16 +82,40 @@ public struct ScanReport: Sendable {
 /// dump can take minutes; `watch` reuses it for rescans that files set off
 /// and refreshes it on its interval. Nothing is written to disk.
 public final class BTMDumpCache: @unchecked Sendable {
-    public private(set) var text: String?
-    public private(set) var taken: Date?
+    // One lock for all fields (V0.12.2): the app writes a helper's dump from
+    // its scan task while a queue run reads the cache on another thread.
+    private let lock = NSLock()
+    private var storedText: String?
+    private var storedTaken: Date?
+    private var storedPreferCached = false
+
+    /// The kept dump, if any.
+    public var text: String? { lock.withLock { storedText } }
+    /// When the kept dump was taken.
+    public var taken: Date? { lock.withLock { storedTaken } }
     /// Set by the caller before a scan: use the kept dump when there is one.
-    public var preferCached = false
+    public var preferCached: Bool {
+        get { lock.withLock { storedPreferCached } }
+        set { lock.withLock { storedPreferCached = newValue } }
+    }
 
     public init() {}
 
-    func store(_ text: String, at date: Date = Date()) {
-        self.text = text
-        taken = date
+    /// The kept dump and its time, read together.
+    public var snapshot: (text: String, taken: Date)? {
+        lock.withLock { storedText.flatMap { text in storedTaken.map { (text, $0) } } }
+    }
+
+    /// Keeps a dump. Public since V0.12.2: the app puts in a dump its
+    /// privileged helper read (as root, without asking for Touch ID).
+    /// - Parameters:
+    ///   - text: The `sfltool dumpbtm` output.
+    ///   - date: When it was taken.
+    public func store(_ text: String, at date: Date = Date()) {
+        lock.withLock {
+            storedText = text
+            storedTaken = date
+        }
     }
 }
 
@@ -202,7 +226,7 @@ public struct ScanCoordinator {
                     + "first answer after idle can take a minute or two (budget \(Int(budget)) s)\n").utf8))
             }
             let result: CommandResult
-            if let cache = env.btmCache, cache.preferCached, let text = cache.text, let taken = cache.taken {
+            if let cache = env.btmCache, cache.preferCached, let (text, taken) = cache.snapshot {
                 result = CommandResult(exitCode: 0, stdout: text, stderr: "")
                 checks.append("sfltool dumpbtm: reused from \(ISO8601DateFormatter().string(from: taken))")
             } else {

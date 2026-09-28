@@ -101,6 +101,60 @@ public enum BTMDumpParser {
         return (records, warnings)
     }
 }
+/// Cuts a `sfltool dumpbtm` output down to what one user may see (V0.12.2).
+///
+/// A dump taken as root lists the records of EVERY user. A privileged
+/// helper that reads it for a client hands back only the client's section
+/// and the system's: sections of UIDs below 500 (`-2` system-wide daemons,
+/// `0` root, service accounts) and the client's UID. Other people's login
+/// items stay private.
+public enum BTMDumpFilter {
+    /// UIDs below this belong to the system, not to a person.
+    public static let firstPersonUID = 500
+
+    /// The dump with only the sections `uid` may see.
+    /// - Parameters:
+    ///   - text: A full `sfltool dumpbtm` output.
+    ///   - uid: The client's UID.
+    /// - Returns: The text before the first section plus the kept sections, unchanged line by line.
+    public static func sections(of text: String, visibleTo uid: Int) -> String {
+        var kept: [Substring] = []
+        var keep = true   // lines before the first section header (banner) stay
+        var pendingSeparators: [Substring] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("====") {
+                // A separator belongs to the next header; decide with it.
+                pendingSeparators.append(line)
+                continue
+            }
+            // A section header counts only right after a separator line. A
+            // header-like line anywhere else (a name with a line break) fails
+            // closed: nothing more is kept until the next real header.
+            if trimmed.hasPrefix("Records for UID ") {
+                keep = pendingSeparators.isEmpty
+                    ? false
+                    : headerUID(trimmed).map { $0 < firstPersonUID || $0 == uid } ?? false
+            }
+            if keep { kept.append(contentsOf: pendingSeparators); kept.append(line) }
+            pendingSeparators.removeAll()
+        }
+        if keep { kept.append(contentsOf: pendingSeparators) }
+        return kept.joined(separator: "\n")
+    }
+
+    /// The UID of a section header, strictly: `Records for UID <n>` followed
+    /// by a space, a colon or the end. Anything else is unreadable — and an
+    /// unreadable header is not trusted with anyone's records.
+    static func headerUID(_ header: String) -> Int? {
+        let rest = header.dropFirst("Records for UID ".count)
+        let number = rest.prefix { $0 == "-" || ($0.isASCII && $0.isNumber) }
+        let after = rest.dropFirst(number.count).first
+        guard after == nil || after == " " || after == ":" else { return nil }
+        return Int(number)
+    }
+}
+
 // MARK: - Containers (System Settings › Login Items & Extensions rows)
 
 /// One app or developer row as System Settings shows it. BTM keeps such a

@@ -207,12 +207,15 @@ public struct ItemCorrelator {
                 accum[standaloneKey] = merged
                 continue
             }
+            // Without a name, the label behind BTM's type prefix ("16.<label>")
+            // is what the user knows — not the internal identifier (V0.12.2).
+            let derivedLabel = stripIdentifierPrefix(rec.identifier)
+            let nameless = rec.name.isEmpty || rec.name == "(null)"
             var item = BackgroundItem(
                 key: standaloneKey,
-                displayName: rec.name.isEmpty ? rec.identifier : rec.name,
+                displayName: nameless ? (derivedLabel.isEmpty ? rec.identifier : derivedLabel) : rec.name,
                 type: rec.typeDescription == "login item" ? .loginItem : .btmEntry)
             item.btmPresent = true
-            let derivedLabel = stripIdentifierPrefix(rec.identifier)
             if derivedLabel.contains(".") { item.label = derivedLabel }
             item.path = rec.url
             item.executable = rec.executablePath
@@ -572,7 +575,7 @@ public struct ItemCorrelator {
         }
         var networkKeyByExecutable: [String: String] = [:]
         for process in input.network.processes {
-            let key = uniqueKey("net:" + (process.executable ?? process.command))
+            let key = uniqueKey(BackgroundItem.listenerKeyPrefix + (process.executable ?? process.command))
             let isRoot = process.user == "root"
             let listening = process.sockets.map { socket -> String in
                 var text = "\(socket.proto)/\(socket.port.map(String.init) ?? socket.address)"

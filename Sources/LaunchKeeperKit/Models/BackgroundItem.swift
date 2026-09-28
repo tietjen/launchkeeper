@@ -4,6 +4,11 @@ import Foundation
 /// A single item may be backed by several plists, launchd jobs and BTM records —
 /// correlation is deliberately many-to-one (a BTM entry is NOT one plist).
 public struct BackgroundItem: Codable, Sendable {
+    /// Key prefix of network listeners (`lsof` processes). Listeners exist
+    /// only while their program runs; consumers (the app's queue) rely on
+    /// this prefix to tell them apart, so it is part of the API (V0.12.2).
+    public static let listenerKeyPrefix = "net:"
+
     /// Display id, assigned per scan run ("01", "02", ...), stable only within a run.
     public var id: String
     /// Stable identity across sources within one run: used by `inspect`.

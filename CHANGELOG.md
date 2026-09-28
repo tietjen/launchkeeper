@@ -5,6 +5,33 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.12.2] — 2026-09-28
+
+### Added
+- `BTMDumpFilter.sections(of:visibleTo:)`: cuts a `sfltool dumpbtm` output
+  taken as root down to the sections one user may see — the system's (UIDs
+  below 500: `-2`, `0`, service accounts) and the user's own. For the app's
+  privileged helper, which reads the dump without asking for Touch ID.
+  Section headers are read strictly (`Records for UID <n>` right after a
+  separator line, ASCII digits, then a space, a colon or the end); a
+  header-like line anywhere else or an unreadable header drops what follows
+  (fail closed).
+- `BTMDumpCache.store(_:at:)` is public: a caller can put in a dump it read
+  elsewhere.
+- `BackgroundItem.listenerKeyPrefix` (`net:`): network listener keys are API
+  now; the app tells listeners apart by it.
+
+### Changed
+- `BTMDumpCache` guards its fields with a lock and offers `snapshot` (text
+  and time read together): the app writes it from its scan task while a
+  queue run reads it on another thread.
+
+### Fixed
+- A Background Task Management entry without a name (its plist already
+  gone) is shown by its label (`de.example.job`) instead of BTM's internal
+  identifier (`16.de.example.job`). Keys are unchanged. A name of `(null)` counts
+  as no name, so such rows no longer read "(null)".
+
 ## [0.12.1] — 2026-09-27
 
 ### Security
