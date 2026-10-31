@@ -139,8 +139,14 @@ xattr -d com.apple.quarantine launchkeeper-v0.5.0-macos-universal/launchkeeper
 
 **Uninstall:** `sudo rm /usr/local/bin/launchkeeper`. launchkeeper keeps its data in
 `~/Library/Logs/launchkeeper/operations.log` (audit log) and
-`~/Library/Application Support/launchkeeper/` (backups, BTM snapshots) — delete
-those only if you no longer need the undo history.
+`~/Library/Application Support/launchkeeper/` (backups, snapshots, your
+quarantine). If the LaunchKeeper app's privileged helper ever changed
+something, there is also a root-owned tree,
+`/Library/Application Support/launchkeeper/` (`quarantine`, `backups`,
+`config-snapshots` — see [Where things are kept](#where-things-are-kept-v012)).
+Check `launchkeeper quarantine` first: whatever is listed there is the only
+way back for what cleanup took away. Delete these folders only if you no
+longer need the undo history — the root-owned one with `sudo rm -rf`.
 
 ### Option B — build from source (Xcode 16+ / Swift 6)
 
@@ -636,7 +642,10 @@ rules, enforced in code:
 - **Moved, not deleted.** `--apply` moves the roots with `sudo mv` into
   `~/Library/Application Support/launchkeeper/quarantine/<stamp>-uninstall-<id>/files/<original path>`
   — a rename on the same volume: instant, no extra space, owner and mode
-  preserved. The manifest is written before the first move.
+  preserved. The manifest is written before the first move. (Run through
+  the LaunchKeeper app, the entry lands in the root-owned
+  `/Library/Application Support/launchkeeper/quarantine/` instead — see
+  [Where things are kept](#where-things-are-kept-v012).)
 - **The receipt goes last, and only when nothing stays.** `pkgutil --forget`
   runs only when no exclusive file of the package remains on disk; its
   `.bom` and `.plist` are copied into the quarantine first, so `quarantine
@@ -654,6 +663,26 @@ case: the plan is just the forget step. macOS may refuse to move an app
 bundle from `/Applications` unless your terminal has *App Management* (or
 Full Disk Access) permission — the verification then reports what did not
 move.
+
+### Where things are kept (V0.12)
+
+There are two quarantines and two sets of snapshots, by who wrote them:
+
+| tree | written by | holds |
+|---|---|---|
+| `~/Library/Application Support/launchkeeper/` | the CLI, as you (moves that need root go through `sudo`) | `quarantine/`, `backups/`, `config-snapshots/`, `btm-snapshots/`, `inventory/` |
+| `/Library/Application Support/launchkeeper/` | only the LaunchKeeper app's privileged helper (root) | `quarantine/`, `backups/`, `config-snapshots/` |
+
+Root never keeps its bookkeeping in a user's home: any process of that user
+could rename a directory there or plant a symlink between root's check and
+root's write. `/Library/Application Support` is root-owned, so nothing on
+the second chain can be swapped. The CLI only **reads** the root-owned tree,
+and `quarantine list`, `restore` and `purge` see both, addressed by the
+entry's name alone. Restoring a helper entry from the CLI works;
+the CLI then says that it could not record the new status there (the
+helper's entries are read-only for you). Purging one is `sudo rm -rf` like
+any other entry. The audit log stays per user
+(`~/Library/Logs/launchkeeper/operations.log`).
 
 ### Leftover entries (V0.8.1)
 
