@@ -661,8 +661,19 @@ public struct CleanupEngine {
               (try? fm.attributesOfItem(atPath: directory))?[.type] as? FileAttributeType == .typeDirectory else {
             return finish(.refused("quarantine path escapes its root"), ["refused: \(directory) is not a quarantine entry"])
         }
-        let plan = [PlannedCommand(command: "/usr/bin/sudo", arguments: ["/bin/rm", "-rf", "--", directory],
-                                   description: "delete the quarantine entry for good — NOT restorable")]
+        // V0.13: an entry of the user's own quarantine that is the user's
+        // through and through goes without sudo — the app cannot answer a
+        // password prompt, and root is not needed there (as for restores
+        // since V0.9.5). The root-owned store (and an environment where both
+        // roots are one, as in the helper) always plans sudo.
+        let rm = ["/bin/rm", "-rf", "--", directory]
+        let description = "delete the quarantine entry for good — NOT restorable"
+        let asUser = store.root == environment.quarantineRoot
+            && environment.quarantineRoot != environment.systemQuarantineRoot
+            && Self.userCanDelete(directory, root: store.root, fileManager: fm)
+        let plan = [asUser
+            ? PlannedCommand(command: rm[0], arguments: Array(rm.dropFirst()), description: description)
+            : PlannedCommand(command: "/usr/bin/sudo", arguments: rm, description: description)]
         var messages = ["\(manifest.moves.count) path(s) of \(manifest.packageIdentifier ?? manifest.kind) "
                         + "(\(manifest.status)) would be deleted for good"]
         if manifest.status == "planned" || manifest.status.hasPrefix("applied-fail") {
@@ -672,11 +683,47 @@ public struct CleanupEngine {
             return finish(.planned, messages + ["dry-run: nothing deleted (add --apply)"], plan: plan)
         }
         let (executed, failure) = run(plan, timeout: environment.purgeTimeout)
-        if let failure { return finish(.appliedFailed(failure), messages + [failure], plan: plan, executed: executed) }
+        if let failure {
+            // rm -rf stops partway on a locked file or a deny ACL: once the
+            // manifest is gone the entry no longer lists — name what is left.
+            var notes = messages + [failure]
+            if (try? fm.attributesOfItem(atPath: directory)) != nil, store.load(name) == nil {
+                notes.append("partly deleted: the rest is still at \(directory) and no longer listed — "
+                             + "delete it in Finder or with rm -rf after unlocking (chflags -R nouchg)")
+            }
+            return finish(.appliedFailed(failure), notes, plan: plan, executed: executed)
+        }
         guard (try? fm.attributesOfItem(atPath: directory)) == nil else {
             return finish(.appliedFailed("quarantine entry still exists"), messages, plan: plan, executed: executed)
         }
         return finish(.appliedOk, messages + ["verified: \(directory) is gone"], plan: plan, executed: executed)
+    }
+
+    /// Whether the running user can delete a quarantine entry without root:
+    /// the root lets them remove the entry, and every directory inside it
+    /// (links are never followed) is theirs with read, write and search
+    /// permission — deleting a file needs only its directory's permission.
+    /// An immutable or append-only flag anywhere sends it to sudo too.
+    /// - Parameters:
+    ///   - directory: The entry's directory.
+    ///   - root: The quarantine root holding it.
+    ///   - fileManager: Lists the directories (the environment's).
+    /// - Returns: `true` when a plain `rm -rf` as the user can succeed.
+    static func userCanDelete(_ directory: String, root: String, fileManager: FileManager) -> Bool {
+        guard access(root, W_OK | X_OK) == 0 else { return false }
+        let uid = geteuid()
+        let blocking = UInt32(UF_IMMUTABLE | UF_APPEND | SF_IMMUTABLE | SF_APPEND)
+        var pending = [directory]
+        while let path = pending.popLast() {
+            var info = stat()
+            guard lstat(path, &info) == 0 else { return false }
+            if info.st_flags & blocking != 0 { return false }
+            guard (info.st_mode & S_IFMT) == S_IFDIR else { continue }
+            guard info.st_uid == uid, info.st_mode & S_IRWXU == S_IRWXU,
+                  let children = try? fileManager.contentsOfDirectory(atPath: path) else { return false }
+            pending += children.map { path + "/" + $0 }
+        }
+        return true
     }
 
     // MARK: - execution

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.13.0] — 2026-11-01
+
+### Changed
+- `quarantine purge` runs without `sudo` when the entry lies in your own
+  quarantine and is yours through and through: every directory in it owned
+  by you with read, write and search permission, the quarantine root
+  writable, no immutable or append-only flags (links are never followed).
+  App leftovers are the typical case. Anything else — the root-owned store,
+  root-owned files from a package uninstall — still plans `sudo rm -rf`,
+  and so does an environment where both quarantine roots are one (the app's
+  privileged helper). Lets the LaunchKeeper app purge such entries itself;
+  it cannot answer a password prompt.
+- A purge that stops partway (a locked file, a deny ACL) after the manifest
+  is gone says where the rest is — the entry no longer lists.
+
+1 new test (360 total).
+
 ## [0.12.2] — 2026-09-28
 
 ### Added

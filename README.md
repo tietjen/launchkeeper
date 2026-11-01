@@ -1,4 +1,4 @@
-# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.12.2)
+# launchkeeper — macOS Background Service Inventory + Gated Remediation (V0.13.0)
 
 > Formerly **btmctl** (releases up to v0.5.0 were published under that name). Same core, same
 > guarantees; data moved from `~/Library/Logs/btmctl` and `~/Library/Application Support/btmctl`
@@ -655,8 +655,11 @@ rules, enforced in code:
   receipt — otherwise the run reports failure, and whatever moved comes
   back with `quarantine restore`.
 - **Restore never overwrites.** Something new at an original place is
-  skipped and named. **Purge** (`sudo rm -rf` of one quarantine entry, after
-  checking it resolves inside the quarantine root) is the only deletion.
+  skipped and named. **Purge** (`rm -rf` of one quarantine entry, after
+  checking it resolves inside the quarantine root) is the only deletion. It
+  runs through `sudo` unless the entry is in your own quarantine and yours
+  through and through — every directory in it owned by you and writable, no
+  immutable flags (V0.13; app leftovers, for example).
 
 Receipts whose files are all gone (`receipts --missing`) are the simple
 case: the plan is just the forget step. macOS may refuse to move an app
@@ -680,8 +683,8 @@ the second chain can be swapped. The CLI only **reads** the root-owned tree,
 and `quarantine list`, `restore` and `purge` see both, addressed by the
 entry's name alone. Restoring a helper entry from the CLI works;
 the CLI then says that it could not record the new status there (the
-helper's entries are read-only for you). Purging one is `sudo rm -rf` like
-any other entry. The audit log stays per user
+helper's entries are read-only for you). Purging one is always `sudo rm -rf`;
+the LaunchKeeper app purges them through its helper. The audit log stays per user
 (`~/Library/Logs/launchkeeper/operations.log`).
 
 ### Leftover entries (V0.8.1)

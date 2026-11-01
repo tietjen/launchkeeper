@@ -420,6 +420,43 @@ final class CleanupUninstallTests: XCTestCase {
         XCTAssertTrue(exists("/Library/Application Support/Tool/config.json"), "purge never touches the live tree")
     }
 
+    func testPurgeOfTheUsersOwnEntryNeedsNoSudo() throws {
+        // The user's store next to a separate root-owned one (CLI and app):
+        // an entry that is the user's through and through is a plain rm.
+        let userRoot = home + "/quarantine", systemRoot = home + "/system-quarantine"
+        let name = "2026-11-01-1Z-leftovers-com.vendor.gone"
+        let entry = userRoot + "/" + name
+        try FileManager.default.createDirectory(atPath: entry + "/files/Users/x/Library/Caches/com.vendor.gone",
+                                                withIntermediateDirectories: true)
+        let manifest = QuarantineManifest(name: name, kind: "leftovers", createdAt: "2026-11-01T00:00:00Z",
+                                          toolVersion: "test", packageIdentifier: "com.vendor.gone", version: nil,
+                                          moves: [], receiptCopies: [], forgot: false, status: "applied-ok", notes: [])
+        XCTAssertNil(QuarantineStore(root: userRoot).write(manifest))
+        let fake = FakeInstaller(root: root)
+        let environment = CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root), home: home,
+                                             quarantineRoot: userRoot, systemQuarantineRoot: systemRoot)
+        let user = CleanupEngine(environment: environment, audit: AuditLog(directory: home + "/logs"))
+        let dry = user.purge(name: name, apply: false)
+        XCTAssertEqual(dry.plan.map(\.command), ["/bin/rm"], "\(dry.plan.map(\.display))")
+
+        // A directory inside without write permission: only root gets through.
+        let locked = entry + "/files/Users/x/Library/Caches/com.vendor.gone"
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked) }
+        XCTAssertEqual(user.purge(name: name, apply: false).plan.map(\.command), ["/usr/bin/sudo"])
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked)
+
+        // One store for both (the helper's environment): always sudo.
+        let helperLike = CleanupEngine(environment: CleanupEnvironment(runner: fake, disk: DiskView(rootPrefix: root),
+                                                                       home: home, quarantineRoot: userRoot),
+                                       audit: AuditLog(directory: home + "/logs"))
+        XCTAssertEqual(helperLike.purge(name: name, apply: false).plan.map(\.command), ["/usr/bin/sudo"])
+
+        let done = user.purge(name: name, apply: true)
+        XCTAssertEqual(done.status, .appliedOk, "\(done.messages)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: entry))
+    }
+
     func testRestoreNeverOverwritesSomethingNewAtTheOriginalPlace() throws {
         let fake = FakeInstaller(root: root)
         toolPackage(fake)
