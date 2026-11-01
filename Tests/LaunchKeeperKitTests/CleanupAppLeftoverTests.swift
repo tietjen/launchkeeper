@@ -116,6 +116,21 @@ final class CleanupAppLeftoverTests: XCTestCase {
             atPath: root + home + "/Library/Saved Application State/org.vim.MacVim.savedState/data.data"))
     }
 
+    func testARunThatMovesNothingKeepsNoEmptyEntry() throws {
+        // macOS refuses the first move (another app's container without Full
+        // Disk Access): no way back is lost, so no entry piles up per retry.
+        gone("org.vim.MacVim")
+        let fake = FakeInstaller(root: root)
+        fake.failMoves = true
+        let result = engine(fake).removeAppLeftovers(bundleIdentifier: "org.vim.MacVim", sources: sources(), apply: true)
+        guard case .appliedFailed = result.status else { return XCTFail("\(result.status)") }
+        XCTAssertNil(result.quarantine)
+        XCTAssertNil(result.undoHint)
+        XCTAssertTrue(result.messages.contains("nothing moved — no quarantine entry kept"), "\(result.messages)")
+        XCTAssertEqual(QuarantineStore(root: quarantine).list().count, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root + home + "/Library/Caches/org.vim.MacVim"))
+    }
+
     func testRefusals() {
         gone("com.vendor.App")
         write(home + "/Library/Caches/org.swift.swiftpm/x")

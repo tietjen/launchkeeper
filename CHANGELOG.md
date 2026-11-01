@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format follows
 semantic versioning once 1.0 is reached. Releases up to 0.4.5 were published
 under the former name **btmctl**.
 
+## [0.13.1] — 2026-11-01
+
+### Fixed
+- `leftovers --apply` no longer leaves an empty quarantine entry when
+  nothing was moved — typically macOS refusing the first move (another
+  app's container in `~/Library/Containers` without App Data / Full Disk
+  Access). Every retry used to add one more "applied-fail" entry with
+  nothing in it (live: 40 of them after two attempts). The result says
+  "nothing moved — no quarantine entry kept"; an entry that holds anything
+  stays as before — checked twice: no moved path is there, and nothing but
+  directories lies under the entry's `files/` (links not followed).
+- The "containers of other apps may need App Data / Full Disk Access" note
+  appears only when a container path is among the problems.
+
+1 new test (361 total).
+
 ## [0.13.0] — 2026-11-01
 
 ### Changed

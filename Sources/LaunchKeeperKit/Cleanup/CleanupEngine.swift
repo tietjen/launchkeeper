@@ -532,11 +532,27 @@ public struct CleanupEngine {
                 }
             }
             let undo = "launchkeeper quarantine restore \(name)"
+            // V0.13.1: nothing reached the quarantine (macOS refused the first
+            // move — typically another app's container without Full Disk
+            // Access): an empty entry is no way back, only clutter that piles
+            // up with every retry. Drop it when it is the user's to drop.
+            let fm = environment.disk.fileManager
+            let nothingMoved = !problems.isEmpty
+                && manifest.moves.allSatisfy { (try? fm.attributesOfItem(atPath: $0.quarantined)) == nil }
+                && Self.onlyDirectories(below: store.directory(name) + "/files", fileManager: fm)
+            let containerHint = problems.contains { $0.contains("/Library/Containers/") || $0.contains("/Library/Group Containers/") }
+                ? ["containers of other apps may need App Data / Full Disk Access for your terminal"] : []
+            if nothingMoved, Self.userCanDelete(store.directory(name), root: store.root, fileManager: fm),
+               (try? fm.removeItem(atPath: store.directory(name))) != nil {
+                audit.append(operation: "quarantine", target: name, status: "dropped-empty")
+                return finish(.appliedFailed(problems[0]), messages + problems
+                              + ["nothing moved — no quarantine entry kept"] + containerHint,
+                              plan: plan, executed: executed)
+            }
             manifest.status = problems.isEmpty ? "applied-ok" : "applied-fail(\(problems.count))"
             _ = store.write(manifest)
             guard problems.isEmpty else {
-                return finish(.appliedFailed(problems[0]), messages + problems
-                              + ["containers of other apps may need App Data / Full Disk Access for your terminal"],
+                return finish(.appliedFailed(problems[0]), messages + problems + containerHint,
                               plan: plan, executed: executed, quarantine: name, undo: undo)
             }
             return finish(.appliedOk, messages + ["verified: \(paths.count) path(s) in the quarantine"], plan: plan,
@@ -720,6 +736,21 @@ public struct CleanupEngine {
             if info.st_flags & blocking != 0 { return false }
             guard (info.st_mode & S_IFMT) == S_IFDIR else { continue }
             guard info.st_uid == uid, info.st_mode & S_IRWXU == S_IRWXU,
+                  let children = try? fileManager.contentsOfDirectory(atPath: path) else { return false }
+            pending += children.map { path + "/" + $0 }
+        }
+        return true
+    }
+
+    /// `true` when nothing but directories lies below a folder (or it is
+    /// missing) — the proof an entry holds no file before it is dropped.
+    /// Links are not followed; anything unreadable counts as a file.
+    static func onlyDirectories(below folder: String, fileManager: FileManager) -> Bool {
+        var info = stat()
+        guard lstat(folder, &info) == 0 else { return errno == ENOENT }
+        var pending = [folder]
+        while let path = pending.popLast() {
+            guard lstat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
                   let children = try? fileManager.contentsOfDirectory(atPath: path) else { return false }
             pending += children.map { path + "/" + $0 }
         }
